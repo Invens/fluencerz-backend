@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const brandController = require('../controllers/brand.controller');
+const reportController = require('../controllers/report.controller');
 const { verifyToken, requireRole } = require('../middleware/auth.middleware');
 const upload = require('../middleware/upload');
 
@@ -16,5 +17,28 @@ router.put('/update', verifyToken, requireRole('brand'), brandController.updateB
 router.patch('/upload-profile', verifyToken, requireRole('brand'), upload.single('image'), brandController.uploadProfileImage);
 router.get('/me', verifyToken, requireRole('brand'), brandController.getMyProfile);
 router.get('/list', brandController.brandList);
+router.post('/add-campaign', verifyToken, requireRole('brand'), upload.single('feature_image'), brandController.createCampaign);
+
+router.get('/campaigns-list',verifyToken, requireRole('brand'),brandController.getMyCampaigns);
+  router.put('/campaigns/:id',verifyToken,requireRole('brand'),upload.single('feature_image'),brandController.updateCampaign);
+  router.get("/campaigns/:id", verifyToken, requireRole("brand"), brandController.getCampaignById);
+
+  
+router.get('/approved-influencers', verifyToken, requireRole('brand'),brandController.getCampaignApplications);
+router.get('/applications/forwarded', verifyToken, requireRole('brand'), brandController.getForwardedApplications);
+router.post('/applications/:id/decision', verifyToken, requireRole('brand'), brandController.flagApplicationDecision);
+
+
+// routes/brand.js reports
+router.get('/campaigns/:id/report', verifyToken, requireRole(['brand','admin']), reportController.getCampaignReport);
+router.post('/deliverables/:deliverableId/review', verifyToken, requireRole(['brand','admin']), reportController.reviewDeliverable);
+router.get('/campaigns/:id/report/pdf', verifyToken, requireRole(['brand','admin']), reportController.exportCampaignReportPDF);
+
+
+// ✅ Fetch all influencers
+router.get('/influencers',  brandController.getAllInfluencers);
+
+// ✅ Fetch influencer by ID
+router.get('/influencers/:id', verifyToken, requireRole('brand'), brandController.getInfluencerById);
 
 module.exports = router;

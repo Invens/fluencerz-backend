@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const influencerController = require('../controllers/influencer.controller');
+const deliverableController = require('../controllers/deliverable.controller');
 const { verifyToken, requireRole } = require('../middleware/auth.middleware');
 const upload = require('../middleware/upload');
 
@@ -22,5 +23,27 @@ router.put('/update', verifyToken, requireRole('influencer'), influencerControll
 router.patch('/upload-profile', verifyToken, requireRole('influencer'), upload.single('image'), influencerController.uploadProfileImage);
 
 router.get('/influencer-filter', influencerController.influencer);
+
+router.get('/campaigns/feed', verifyToken, requireRole('influencer'), influencerController.getCampaignFeed);
+router.get('/campaigns/:id', verifyToken, requireRole('influencer'), influencerController.getSingleCampaign);
+router.post('/campaigns/:id/apply', verifyToken, requireRole('influencer'), influencerController.applyToCampaign);
+router.get('/applied-campaigns', verifyToken, requireRole('influencer'), influencerController.getAppliedCampaigns);
+
+// routes/influencer.js
+router.post(
+    '/campaigns/:id/deliverables',
+    verifyToken, requireRole('influencer'),
+    upload.single('proof_file'), // Multer
+    deliverableController.submitDeliverable
+  );
+  
+  router.put(
+    '/deliverables/:deliverableId',
+    verifyToken, requireRole('influencer'),
+    upload.single('proof_file'),
+    deliverableController.updateOwnDeliverable
+  );
+  
+
 
 module.exports = router;

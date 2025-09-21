@@ -10,10 +10,11 @@ const adminRoutes = require('./routes/admin.routes');
 const campaignRoutes = require('./routes/campaign.routes');
 const BrandRequest = require('./routes/brand.routes');
 const InstagramRoutes = require('./routes/instagram.routes');
+const InstagramInsights = require('./routes/InstagramInsight.routes');
 
 
 app.use(cors({
-  origin: '*', // Allow your frontend domain
+  origin: '*', 
   credentials: true
 }));
 app.use(express.json());
@@ -30,7 +31,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/campaign', campaignRoutes);
 app.use('/api/instagram/', InstagramRoutes);
 app.use('/api/brand', BrandRequest);
-
+app.use('/connect', InstagramInsights);
 
 
 

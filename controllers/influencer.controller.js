@@ -38,7 +38,7 @@ exports.getMyProfile = async (req, res) => {
 
 
 // PUT /influencer/update
-
+// POST /influencer/update
 exports.updateMyProfile = async (req, res) => {
   try {
     const {
@@ -60,66 +60,50 @@ exports.updateMyProfile = async (req, res) => {
       return res.status(404).json({ message: 'Influencer not found.' });
     }
 
-    // Helper function to validate JSON
-    const validateJson = (data, fieldName) => {
-      if (data === undefined) return undefined;
-      if (data === null || data === '') return '[]';
+    // ✅ helper: normalize JSON to string
+    const normalizeJson = (data, fieldName, expectedType = 'array') => {
+      if (data === undefined) return influencer[fieldName]; // no change
+      if (data === null || data === '') return expectedType === 'array' ? '[]' : '{}';
+
       try {
-        const parsed = JSON.parse(data);
-        if (!Array.isArray(parsed)) {
+        const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+
+        if (expectedType === 'array' && !Array.isArray(parsed)) {
           throw new Error(`${fieldName} must be an array`);
         }
-        return data;
+        if (expectedType === 'object' && (typeof parsed !== 'object' || Array.isArray(parsed))) {
+          throw new Error(`${fieldName} must be an object`);
+        }
+
+        return JSON.stringify(parsed);
       } catch (err) {
         throw new Error(`Invalid JSON for ${fieldName}: ${err.message}`);
       }
     };
 
-    // Update fields
-    influencer.phone = phone !== undefined ? phone : influencer.phone;
-    influencer.skype = skype !== undefined ? skype : influencer.skype;
-    influencer.niche = niche !== undefined ? niche : influencer.niche;
-    influencer.portfolio = portfolio !== undefined ? portfolio : influencer.portfolio;
-    influencer.followers_count =
-      followers_count !== undefined ? parseInt(followers_count) || 0 : influencer.followers_count;
-    influencer.total_reach =
-      total_reach !== undefined ? parseInt(total_reach) || 0 : influencer.total_reach;
-    influencer.engagement_rate =
-      engagement_rate !== undefined ? parseFloat(engagement_rate) || 0 : influencer.engagement_rate;
-    influencer.audience_age_group =
-      audience_age_group !== undefined ? audience_age_group : influencer.audience_age_group;
+    // ✅ assign simple fields
+    influencer.phone = phone ?? influencer.phone;
+    influencer.skype = skype ?? influencer.skype;
+    influencer.niche = niche ?? influencer.niche;
+    influencer.portfolio = portfolio ?? influencer.portfolio;
+    influencer.followers_count = followers_count !== undefined ? parseInt(followers_count) || 0 : influencer.followers_count;
+    influencer.total_reach = total_reach !== undefined ? parseInt(total_reach) || 0 : influencer.total_reach;
+    influencer.engagement_rate = engagement_rate !== undefined ? parseFloat(engagement_rate) || 0 : influencer.engagement_rate;
+    influencer.audience_age_group = audience_age_group ?? influencer.audience_age_group;
 
-    // Validate and update JSON fields
-    try {
-      influencer.social_platforms =
-        social_platforms !== undefined
-          ? validateJson(social_platforms, 'social_platforms')
-          : influencer.social_platforms;
-      influencer.followers_by_country =
-        followers_by_country !== undefined
-          ? validateJson(followers_by_country, 'followers_by_country')
-          : influencer.followers_by_country;
-      influencer.audience_gender =
-        audience_gender !== undefined
-          ? validateJson(audience_gender, 'audience_gender')
-          : influencer.audience_gender;
-    } catch (err) {
-      return res.status(400).json({ message: err.message });
-    }
+    // ✅ normalize JSON fields
+    influencer.social_platforms = normalizeJson(social_platforms, 'social_platforms', 'array');
+    influencer.followers_by_country = normalizeJson(followers_by_country, 'followers_by_country', 'array');
+    influencer.audience_gender = normalizeJson(audience_gender, 'audience_gender', 'object');
 
-    // Save only if changes exist
-    const changes = influencer.changed();
-    if (changes) {
-      await influencer.save();
-      res.status(200).json({ message: 'Profile updated successfully!' });
-    } else {
-      res.status(200).json({ message: 'No changes to save.' });
-    }
+    await influencer.save();
+    res.status(200).json({ message: 'Profile updated successfully!' });
   } catch (err) {
     console.error('Update error:', err.message);
     res.status(400).json({ message: err.message || 'Invalid input data' });
   }
 };
+
 // 📥 Get all notifications for the influencer
 exports.getNotifications = async (req, res) => {
   try {
@@ -339,3 +323,181 @@ exports.getMyCampaigns = async (req, res) => {
       res.status(500).json({ message: 'Failed to retrieve influencers', error: err.message });
     }
   };
+
+  exports.getCampaignFeed = async (req, res) => {
+    try {
+      const influencerId = req.user.id;
+  
+      // Get campaigns the influencer already applied for
+      const appliedCampaignIds = await db.CampaignApplication.findAll({
+        where: { influencer_id: influencerId },
+        attributes: ['campaign_id']
+      }).then(results => results.map(r => r.campaign_id));
+  
+      // Fetch campaigns
+      const campaigns = await db.Campaign.findAll({
+        where: {
+          status: 'published',
+          id: { [db.Sequelize.Op.notIn]: appliedCampaignIds }
+        },
+        include: [{ model: db.Brand, attributes: ['company_name', 'profile_image'] }],
+        order: [['created_at', 'DESC']]
+      });
+  
+      res.json({ message: 'Available campaigns', data: campaigns });
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  };
+  
+
+  // influencer.controller.js
+
+exports.applyToCampaign = async (req, res) => {
+  try {
+    const influencerId = req.user.id;
+    const campaignId = req.params.id;
+
+    // Check if already applied
+    const existing = await db.CampaignApplication.findOne({
+      where: { influencer_id: influencerId, campaign_id: campaignId }
+    });
+
+    if (existing) return res.status(400).json({ message: 'You already applied to this campaign' });
+
+    // Create application
+    await db.CampaignApplication.create({
+      influencer_id: influencerId,
+      campaign_id: campaignId,
+      status: 'pending'
+    });
+
+    res.status(201).json({ message: 'Application submitted successfully' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+
+// GET /api/influencer/campaigns/:id
+exports.getSingleCampaign = async (req, res) => {
+  const campaignId = req.params.id;
+
+  try {
+    const campaign = await db.Campaign.findByPk(campaignId, {
+      include: [
+        {
+          model: db.Brand,
+          attributes: ['id', 'company_name', 'email','profile_picture']
+        }
+      ]
+    });
+
+    if (!campaign) {
+      return res.status(404).json({ message: 'Campaign not found' });
+    }
+
+    // Optional: Check if influencer already applied
+    const influencerId = req.user?.id;
+    let applied = false;
+
+    if (influencerId) {
+      const existingApplication = await db.CampaignApplication.findOne({
+        where: {
+          campaign_id: campaignId,
+          influencer_id: influencerId
+        }
+      });
+      applied = !!existingApplication;
+    }
+
+    // Parse stringified JSON fields
+    const parsedCampaign = {
+      ...campaign.toJSON(),
+      eligibility_criteria: parseJsonSafe(campaign.eligibility_criteria),
+      campaign_requirements: parseJsonSafe(campaign.campaign_requirements),
+      guidelines_do: parseJsonSafe(campaign.guidelines_do),
+      guidelines_donot: parseJsonSafe(campaign.guidelines_donot)
+    };
+
+    res.json({
+      message: 'Campaign details fetched successfully',
+      campaign: parsedCampaign,
+      applied
+    });
+
+  } catch (err) {
+    console.error('❌ Error fetching campaign:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// 🛠️ Safe JSON parsing
+function parseJsonSafe(jsonStr) {
+  try {
+    return JSON.parse(jsonStr || '[]');
+  } catch (e) {
+    return [];
+  }
+}
+
+// GET /influencer/applied-campaigns
+// GET /influencer/applied-campaigns
+exports.getAppliedCampaigns = async (req, res) => {
+  try {
+    const influencerId = req.user.id;
+
+    const applications = await db.CampaignApplication.findAll({
+      where: { influencer_id: influencerId },
+      include: [
+        {
+          model: db.Campaign,
+          include: [
+            {
+              model: db.Brand,
+              attributes: ['id', 'company_name', 'email', 'profile_picture']
+            }
+          ]
+        }
+      ],
+      order: [['applied_at', 'DESC']]   // ✅ FIX: use applied_at, not created_at
+    });
+
+    if (!applications.length) {
+      return res.status(200).json({ message: 'No applied campaigns found', data: [] });
+    }
+
+    const parsed = applications.map(app => {
+      const campaign = app.Campaign ? app.Campaign.toJSON() : {};
+      return {
+        application_id: app.id,
+        status: app.status,
+        applied_at: app.applied_at,
+        campaign: {
+          ...campaign,
+          eligibility_criteria: parseJsonSafe(campaign.eligibility_criteria),
+          campaign_requirements: parseJsonSafe(campaign.campaign_requirements),
+          guidelines_do: parseJsonSafe(campaign.guidelines_do),
+          guidelines_donot: parseJsonSafe(campaign.guidelines_donot)
+        }
+      };
+    });
+
+    res.json({
+      message: 'Applied campaigns retrieved successfully',
+      data: parsed
+    });
+
+  } catch (err) {
+    console.error('❌ Error fetching applied campaigns:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+function parseJsonSafe(jsonStr) {
+  try {
+    return JSON.parse(jsonStr || '[]');
+  } catch {
+    return [];
+  }
+}
