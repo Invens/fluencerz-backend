@@ -74,4 +74,11 @@ router.get(
 );
 
 
+
+router.post(
+  "/recommend-influencers",
+  verifyToken,
+  requireRole("brand"),
+  brandController.recommendInfluencers
+);
 module.exports = router;

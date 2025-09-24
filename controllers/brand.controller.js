@@ -1,4 +1,5 @@
 const db = require('../models');
+const axios = require("axios");
 const Campaign = db.Campaign;
 const CampaignApplication = db.CampaignApplication;
 const Influencer = db.Influencer;
@@ -856,5 +857,74 @@ exports.getDashboardInsights = async (req, res) => {
   } catch (err) {
     console.error('❌ Error fetching dashboard insights:', err);
     res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+
+
+exports.recommendInfluencers = async (req, res) => {
+  try {
+    const campaignDraft = req.body; // campaign form draft from frontend
+
+    // Fetch influencers from DB
+    const influencers = await Influencer.findAll({
+      attributes: [
+        "id",
+        "full_name",
+        "niche",
+        "followers_count",
+        "engagement_rate",
+        "profile_image",
+      ],
+    });
+
+    // Send to DeepSeek API
+    const response = await axios.post(
+      "https://api.deepseek.com/v1/chat/completions",
+      {
+        model: "deepseek-chat",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are an assistant that selects influencers. Return only a JSON array of influencer IDs that best fit the campaign draft.",
+          },
+          {
+            role: "user",
+            content: `Here is a campaign draft: ${JSON.stringify(
+              campaignDraft
+            )}. 
+Here is a list of influencers: ${JSON.stringify(influencers)}. 
+Return ONLY influencer IDs in JSON array format. Example: [1,5,7]`,
+          },
+        ],
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    const aiOutput = response.data.choices[0].message.content.trim();
+    let recommendedIds = [];
+    try {
+      recommendedIds = JSON.parse(aiOutput);
+    } catch (e) {
+      console.warn("⚠️ AI output not JSON:", aiOutput);
+    }
+
+    // Filter influencers from DB
+    const recommended = influencers.filter((i) =>
+      recommendedIds.includes(i.id)
+    );
+
+    res.json({ success: true, recommended });
+  } catch (err) {
+    console.error("❌ Recommend Influencers Error:", err.message);
+    res
+      .status(500)
+      .json({ success: false, message: "AI recommendation failed" });
   }
 };
