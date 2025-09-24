@@ -260,8 +260,8 @@ exports.brandList = async (req, res) => {
   }
 }
 
-// POST /api/brand/campaigns
-// POST /api/brand/campaigns
+
+
 exports.createCampaign = async (req, res) => {
   try {
     const brandId = req.user.id; // From auth middleware
@@ -276,22 +276,23 @@ exports.createCampaign = async (req, res) => {
       campaign_requirements,
       guidelines_do,
       guidelines_donot,
+      influencer_ids, // optional array
     } = req.body;
 
     const feature_image = req.file
       ? `/uploads/brands/${req.file.filename}`
       : null;
 
-    // ✅ Parse JSON safely (if frontend sends stringified JSON)
     const parseField = (field) => {
       if (!field) return null;
       try {
         return typeof field === "string" ? JSON.parse(field) : field;
       } catch {
-        return field; // fallback, store raw if invalid JSON
+        return field;
       }
     };
 
+    // Create campaign
     const campaign = await Campaign.create({
       brand_id: brandId,
       title,
@@ -308,6 +309,20 @@ exports.createCampaign = async (req, res) => {
       status: "published",
     });
 
+    // If brand assigned influencers, create applications
+    if (influencer_ids) {
+      const ids = JSON.parse(influencer_ids);
+      if (Array.isArray(ids) && ids.length > 0) {
+        const apps = ids.map((iid) => ({
+          influencer_id: iid,
+          campaign_id: campaign.id,
+          status: "brand_approved", // ✅ forwarded by brand
+          forwardedBy: "brand",
+        }));
+        await CampaignApplication.bulkCreate(apps);
+      }
+    }
+
     res.status(201).json({
       success: true,
       message: "Campaign created successfully!",
@@ -320,31 +335,25 @@ exports.createCampaign = async (req, res) => {
 };
 
 
+
+// ----------------- GET BRAND CAMPAIGNS -----------------
 exports.getMyCampaigns = async (req, res) => {
   try {
-    const brandId = req.user.id; // From JWT middleware
+    const brandId = req.user.id;
 
-    const campaigns = await Campaign.findAll({
+    const campaigns = await db.Campaign.findAll({
       where: { brand_id: brandId },
       order: [['created_at', 'DESC']],
     });
 
-    res.json({
-      success: true,
-      data: campaigns,
-    });
+    res.json({ success: true, data: campaigns });
   } catch (err) {
     console.error('❌ Error fetching campaigns:', err);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error',
-      error: err.message,
-    });
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
-// PUT /api/brand/campaigns/:id
-// PUT /api/brand/campaigns/:id
+// ✅ Update Campaign (with influencers update optional)
 exports.updateCampaign = async (req, res) => {
   try {
     const brandId = req.user.id;
@@ -358,7 +367,6 @@ exports.updateCampaign = async (req, res) => {
       return res.status(404).json({ success: false, message: "Campaign not found" });
     }
 
-    // If new file uploaded, update path
     let feature_image = campaign.feature_image;
     if (req.file) {
       feature_image = `/uploads/brands/${req.file.filename}`;
@@ -375,10 +383,10 @@ exports.updateCampaign = async (req, res) => {
       campaign_requirements,
       guidelines_do,
       guidelines_donot,
-      status, // optional
+      status,
+      influencer_ids, // optional
     } = req.body;
 
-    // ✅ Parse JSON safely
     const parseField = (field) => {
       if (!field) return null;
       try {
@@ -403,6 +411,26 @@ exports.updateCampaign = async (req, res) => {
       status: status || campaign.status,
     });
 
+    // ✅ Handle influencers update
+    if (influencer_ids) {
+      const ids = JSON.parse(influencer_ids);
+      if (Array.isArray(ids)) {
+        // Remove old forwarded applications
+        await CampaignApplication.destroy({
+          where: { campaign_id: campaign.id, status: "brand_approved" },
+        });
+
+        // Insert new forwarded applications
+        const apps = ids.map((iid) => ({
+          influencer_id: iid,
+          campaign_id: campaign.id,
+          status: "forwarded",
+          forwardedBy: "brand",
+        }));
+        await CampaignApplication.bulkCreate(apps);
+      }
+    }
+
     res.json({
       success: true,
       message: "Campaign updated successfully!",
@@ -413,8 +441,6 @@ exports.updateCampaign = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
-
-
 
 
 exports.getCampaignApplications = async (req, res) => {
