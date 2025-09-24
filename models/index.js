@@ -19,6 +19,7 @@ db.InfluencerInstagramAccount = require('./InfluencerInstagramAccount.model')(se
 db.CampaignApplication= require('./CampaignApplication')(sequelize, Sequelize);
 db.CampaignMessage = require('./CampaignMessage')(sequelize, Sequelize);
 db.CampaignMediaFile = require('./CampaignMediaFile')(sequelize, Sequelize);
+db.CampaignDeliverable = require('./CampaignDeliverable')(sequelize, Sequelize);
 
 
 // CampaignMessage ↔ Brand
@@ -36,6 +37,19 @@ db.CampaignMessage.belongsTo(db.Influencer, {
 });
 
 // In models/index.js
+
+
+// Brand ↔ Campaign
+db.Brand.hasMany(db.Campaign, { foreignKey: 'brand_id' });
+db.Campaign.belongsTo(db.Brand, { foreignKey: 'brand_id' });
+
+// Campaign ↔ Deliverables
+db.Campaign.hasMany(db.CampaignDeliverable, { foreignKey: 'campaign_id', as: 'deliverables' });
+db.CampaignDeliverable.belongsTo(db.Campaign, { foreignKey: 'campaign_id' });
+
+// Influencer ↔ Deliverables
+db.Influencer.hasMany(db.CampaignDeliverable, { foreignKey: 'influencer_id' });
+db.CampaignDeliverable.belongsTo(db.Influencer, { foreignKey: 'influencer_id' });
 
 // Media uploader can be Brand
 db.Brand.hasMany(db.CampaignMediaFile, { foreignKey: 'uploader_id', constraints: false, scope: { uploader_type: 'brand' } });

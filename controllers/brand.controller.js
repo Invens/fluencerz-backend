@@ -3,6 +3,8 @@ const Campaign = db.Campaign;
 const CampaignApplication = db.CampaignApplication;
 const Influencer = db.Influencer;
 const InfluencerInstagramAccount = db.InfluencerInstagramAccount;
+const CampaignDeliverable = db.CampaignDeliverable;
+
 
 // ✅ Update brand profile (phone, skype, industry, website)
 exports.updateBrandProfile = async (req, res) => {
@@ -107,10 +109,10 @@ exports.getBrandOverview = async (req, res) => {
   }
 };
 
-exports.influencers = async (req, res) =>{
+exports.influencers = async (req, res) => {
   try {
     const influencers = await db.Influencer.findAll({
-      attributes: ['id', 'full_name', 'niche', 'followers_count', 'social_platforms','profile_image']
+      attributes: ['id', 'full_name', 'niche', 'followers_count', 'social_platforms', 'profile_image']
     });
     res.json(influencers);
   } catch (err) {
@@ -119,7 +121,7 @@ exports.influencers = async (req, res) =>{
 
 }
 
-exports.campaign = async (req, res)=> {
+exports.campaign = async (req, res) => {
 
   try {
     const brandId = req.user.id;
@@ -142,7 +144,7 @@ exports.campaign = async (req, res)=> {
   }
 }
 
-exports.ratings = async (req, res) =>{
+exports.ratings = async (req, res) => {
   try {
     const brandId = req.user.id;
 
@@ -493,7 +495,6 @@ exports.getCampaignApplications = async (req, res) => {
   }
 };
 
-
 /**
  * Brand makes final decision (approve/reject)
  */
@@ -729,5 +730,105 @@ exports.getInfluencerById = async (req, res) => {
   } catch (err) {
     console.error('❌ Error fetching influencer by ID:', err);
     res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+
+exports.getDashboardInsights = async (req, res) => {
+  try {
+    const brandId = req.user.id;
+
+    const campaigns = await db.Campaign.findAll({
+      where: { brand_id: brandId },
+      attributes: ['id', 'title', 'status', 'created_at'], // 👈 FIX: status not campaign_status
+      include: [
+        {
+          model: db.CampaignDeliverable,
+          as: 'deliverables',
+          attributes: ['id', 'metrics', 'status']
+        }
+      ]
+    });
+
+    if (!campaigns || campaigns.length === 0) {
+      return res.json({
+        success: true,
+        data: {
+          totalCampaigns: 0,
+          activeCampaigns: 0,
+          closedCampaigns: 0,
+          deliverables: 0,
+          reach: 0,
+          impressions: 0,
+          likes: 0,
+          comments: 0,
+          saves: 0,
+          shares: 0,
+          views: 0,
+          campaigns: []
+        }
+      });
+    }
+
+    // Initialize totals
+    const totals = {
+      totalCampaigns: campaigns.length,
+      activeCampaigns: campaigns.filter(c => c.status === 'published').length,
+      closedCampaigns: campaigns.filter(c => c.status === 'closed').length,
+      deliverables: 0,
+      reach: 0,
+      impressions: 0,
+      likes: 0,
+      comments: 0,
+      saves: 0,
+      shares: 0,
+      views: 0,
+      campaigns: []
+    };
+
+    // Per-campaign stats
+    campaigns.forEach(c => {
+      const stats = {
+        id: c.id,
+        title: c.title,
+        status: c.status, // 👈 FIX here also
+        created_at: c.created_at,
+        deliverables: c.deliverables?.length || 0,
+        reach: 0,
+        impressions: 0,
+        likes: 0,
+        comments: 0,
+        saves: 0,
+        shares: 0,
+        views: 0
+      };
+
+      (c.deliverables || []).forEach(d => {
+        const m = d.metrics || {};
+        stats.reach += Number(m.reach || 0);
+        stats.impressions += Number(m.impressions || 0);
+        stats.likes += Number(m.likes || 0);
+        stats.comments += Number(m.comments || 0);
+        stats.saves += Number(m.saves || 0);
+        stats.shares += Number(m.shares || 0);
+        stats.views += Number(m.views || 0);
+
+        totals.reach += Number(m.reach || 0);
+        totals.impressions += Number(m.impressions || 0);
+        totals.likes += Number(m.likes || 0);
+        totals.comments += Number(m.comments || 0);
+        totals.saves += Number(m.saves || 0);
+        totals.shares += Number(m.shares || 0);
+        totals.views += Number(m.views || 0);
+      });
+
+      totals.deliverables += stats.deliverables;
+      totals.campaigns.push(stats);
+    });
+
+    res.json({ success: true, data: totals });
+  } catch (err) {
+    console.error('❌ Error fetching dashboard insights:', err);
+    res.status(500).json({ success: false, message: err.message });
   }
 };

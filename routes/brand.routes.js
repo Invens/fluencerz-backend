@@ -41,4 +41,13 @@ router.get('/influencers',  brandController.getAllInfluencers);
 // ✅ Fetch influencer by ID
 router.get('/influencers/:id', verifyToken, requireRole('brand'), brandController.getInfluencerById);
 
+// routes/brand.js
+router.get(
+  '/dashboard/insights',
+  verifyToken,
+  requireRole('brand'),
+  brandController.getDashboardInsights
+);
+
+
 module.exports = router;
