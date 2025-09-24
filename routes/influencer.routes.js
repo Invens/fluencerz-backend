@@ -29,21 +29,26 @@ router.get('/campaigns/:id', verifyToken, requireRole('influencer'), influencerC
 router.post('/campaigns/:id/apply', verifyToken, requireRole('influencer'), influencerController.applyToCampaign);
 router.get('/applied-campaigns', verifyToken, requireRole('influencer'), influencerController.getAppliedCampaigns);
 
-// routes/influencer.js
 router.post(
-    '/campaigns/:id/deliverables',
-    verifyToken, requireRole('influencer'),
-    upload.single('proof_file'), // Multer
-    deliverableController.submitDeliverable
-  );
-  
-  router.put(
-    '/deliverables/:deliverableId',
-    verifyToken, requireRole('influencer'),
-    upload.single('proof_file'),
-    deliverableController.updateOwnDeliverable
-  );
-  
+  '/campaigns/:id/deliverables',
+  verifyToken, requireRole('influencer'),
+  upload.single('proof_file'),
+  deliverableController.submitDeliverable
+);
 
+// Edit own deliverable (only if not approved)
+router.put(
+  '/deliverables/:deliverableId',
+  verifyToken, requireRole('influencer'),
+  upload.single('proof_file'),
+  deliverableController.updateOwnDeliverable
+);
+
+// List own deliverables for a specific campaign
+router.get(
+  '/campaigns/:id/deliverables',
+  verifyToken, requireRole('influencer'),
+  deliverableController.getMyDeliverablesForCampaign
+);
 
 module.exports = router;

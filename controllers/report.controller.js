@@ -1,46 +1,51 @@
 // controllers/report.controller.js
-const { Campaign, CampaignDeliverable, Influencer } = require('../models');
-const { Op } = require('sequelize');
-const path = require('path');
+const db = require('../models');
+const { Campaign, CampaignDeliverable, Influencer, DeliverableComment } = db;
 const { renderCampaignReportHTML, pdfFromHTML } = require('../utils/reportPdf');
 
-exports.getCampaignReport = async (req, res) => {
-  try {
-    const campaignId = Number(req.params.id);
+async function aggregateCampaign(campaignId) {
+  const campaign = await Campaign.findByPk(campaignId);
+  if (!campaign) throw new Error('Campaign not found');
 
-    const campaign = await Campaign.findByPk(campaignId, { include: [{ model: Influencer, through: { attributes: [] }, required: false }] });
+  const deliverables = await CampaignDeliverable.findAll({
+    where: { campaign_id: campaignId },
+    include: [{ model: Influencer, attributes: ['id','full_name','profile_image','niche','followers_count','engagement_rate'] }]
+  });
 
-    const deliverables = await CampaignDeliverable.findAll({
-      where: { campaign_id: campaignId },
-      include: [{ model: Influencer, attributes: ['id','full_name','profile_image','niche','followers_count','engagement_rate'] }]
-    });
+  const totals = {
+    deliverables: deliverables.length,
+    reach: 0, impressions: 0, likes: 0, comments: 0, saves: 0, shares: 0, views: 0, profile_visits: 0
+  };
+  const byInfluencer = {};
 
-    // Aggregate KPIs
-    const totals = {
-      deliverables: deliverables.length,
-      reach: 0, impressions: 0, likes: 0, comments: 0, saves: 0, shares: 0, views: 0, profile_visits: 0
-    };
-    const byInfluencer = {};
-
-    for (const d of deliverables) {
-      const m = d.metrics || {};
-      for (const k of Object.keys(totals)) {
-        if (k === 'deliverables') continue;
-        totals[k] += Number(m[k] || 0);
-      }
-      const key = d.Influencer?.id || 'unknown';
-      byInfluencer[key] = byInfluencer[key] || {
+  for (const d of deliverables) {
+    const m = d.metrics || {};
+    for (const k of Object.keys(totals)) {
+      if (k === 'deliverables') continue;
+      totals[k] += Number(m[k] || 0);
+    }
+    const key = d.Influencer?.id || 'unknown';
+    if (!byInfluencer[key]) {
+      byInfluencer[key] = {
         influencer: d.Influencer,
         items: [],
         subtotals: { reach:0, impressions:0, likes:0, comments:0, saves:0, shares:0, views:0, profile_visits:0 }
       };
-      byInfluencer[key].items.push(d);
-      for (const k of Object.keys(byInfluencer[key].subtotals)) {
-        byInfluencer[key].subtotals[k] += Number(m[k] || 0);
-      }
     }
+    byInfluencer[key].items.push(d);
+    for (const k of Object.keys(byInfluencer[key].subtotals)) {
+      byInfluencer[key].subtotals[k] += Number(m[k] || 0);
+    }
+  }
 
-    res.json({ success: true, data: { campaign, totals, deliverables, byInfluencer } });
+  return { campaign, totals, deliverables, byInfluencer };
+}
+
+exports.getCampaignReport = async (req, res) => {
+  try {
+    const campaignId = Number(req.params.id);
+    const data = await aggregateCampaign(campaignId);
+    res.json({ success: true, data });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -51,12 +56,16 @@ exports.reviewDeliverable = async (req, res) => {
     const deliverableId = Number(req.params.deliverableId);
     const { decision, comment } = req.body; // 'approved' | 'rejected' | 'needs_changes'
     const d = await CampaignDeliverable.findByPk(deliverableId);
-    if (!d) return res.status(404).json({ message: 'Not found' });
+    if (!d) return res.status(404).json({ success: false, message: 'Deliverable not found' });
 
-    await d.update({ status: decision, reviewed_at: new Date() });
+    if (!['approved','rejected','needs_changes'].includes(decision)) {
+      return res.status(400).json({ success: false, message: 'Invalid decision' });
+    }
+
+    await d.update({ status: decision, reviewed_at: new Date(), updated_at: new Date() });
 
     if (comment) {
-      await req.db.DeliverableComment.create({
+      await DeliverableComment.create({
         deliverable_id: d.id,
         author_role: req.user.role,
         author_id: req.user.id,
@@ -72,20 +81,14 @@ exports.reviewDeliverable = async (req, res) => {
 exports.exportCampaignReportPDF = async (req, res) => {
   try {
     const campaignId = Number(req.params.id);
-    // Reuse the aggregation
-    const { data } = await (async () => {
-      const fakeReq = { ...req, params: { id: campaignId } };
-      const mem = {};
-      await exports.getCampaignReport(fakeReq, { json: (v)=>Object.assign(mem, v) });
-      return mem;
-    })();
+    const data = await aggregateCampaign(campaignId);
 
     const html = await renderCampaignReportHTML(data);
-    const pdfBuffer = await pdfFromHTML(html); // Puppeteer/Playwright
+    const pdfBuffer = await pdfFromHTML(html);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename=campaign_${campaignId}_report.pdf`);
-    return res.send(pdfBuffer);
+    res.send(pdfBuffer);
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

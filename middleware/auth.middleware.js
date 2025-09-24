@@ -13,11 +13,12 @@ exports.verifyToken = (req, res, next) => {
     res.status(400).json({ message: 'Invalid or expired token.' });
   }
 };
-
-// Middleware to allow only specific role
-exports.requireRole = (allowedRole) => {
+// Middleware to allow one or multiple roles
+exports.requireRole = (allowedRoles) => {
   return (req, res, next) => {
-    if (req.user.role !== allowedRole) {
+    const roles = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
+
+    if (!req.user || !roles.includes(req.user.role)) {
       return res.status(403).json({ message: 'Forbidden: Insufficient permissions.' });
     }
     next();

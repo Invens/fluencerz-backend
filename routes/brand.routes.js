@@ -3,6 +3,7 @@ const router = express.Router();
 const brandController = require('../controllers/brand.controller');
 const reportController = require('../controllers/report.controller');
 const { verifyToken, requireRole } = require('../middleware/auth.middleware');
+const deliverableController = require('../controllers/deliverable.controller');
 const upload = require('../middleware/upload');
 
 // Brand dashboard - see all requests & campaigns
@@ -29,11 +30,34 @@ router.get('/applications/forwarded', verifyToken, requireRole('brand'), brandCo
 router.post('/applications/:id/decision', verifyToken, requireRole('brand'), brandController.flagApplicationDecision);
 
 
-// routes/brand.js reports
-router.get('/campaigns/:id/report', verifyToken, requireRole(['brand','admin']), reportController.getCampaignReport);
-router.post('/deliverables/:deliverableId/review', verifyToken, requireRole(['brand','admin']), reportController.reviewDeliverable);
-router.get('/campaigns/:id/report/pdf', verifyToken, requireRole(['brand','admin']), reportController.exportCampaignReportPDF);
 
+// Deliverables listing for a campaign
+router.get(
+  '/campaigns/:id/deliverables',
+  verifyToken, requireRole('brand'),
+  deliverableController.getCampaignDeliverables
+);
+
+// Review a deliverable
+router.post(
+  '/deliverables/:deliverableId/review',
+  verifyToken, requireRole(['brand','admin']),
+  reportController.reviewDeliverable
+);
+
+// Campaign aggregated report (JSON)
+router.get(
+  '/campaigns/:id/report',
+  verifyToken, requireRole(['brand','admin']),
+  reportController.getCampaignReport
+);
+
+// Export campaign report as PDF
+router.get(
+  '/campaigns/:id/report/pdf',
+  verifyToken, requireRole(['brand','admin']),
+  reportController.exportCampaignReportPDF
+);
 
 // ✅ Fetch all influencers
 router.get('/influencers',  brandController.getAllInfluencers);
