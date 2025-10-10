@@ -1,13 +1,17 @@
+// routes/auth.routes.js
 const express = require('express');
 const router = express.Router();
-const authController = require('../controllers/auth.controller');
+const auth = require('../controllers/auth.controller');
+const { verifyToken } = require('../middleware/auth.middleware');
 
-// Register routes
-router.post('/register/influencer', authController.registerInfluencer);
-router.post('/register/brand', authController.registerBrand);
-router.post('/register/admin', authController.registerAdmin);
+// Public
+router.post('/register', auth.register);
+router.post('/login', auth.login);
 
-// Login route (shared)
-router.post('/login', authController.login);
+// Protected
+router.get('/me', verifyToken, auth.me);
+router.post('/select-type', verifyToken, auth.selectType);
+router.put('/brand/onboard', verifyToken, auth.updateBrandProfile);
+router.put('/influencer/onboard', verifyToken, auth.updateInfluencerProfile);
 
 module.exports = router;

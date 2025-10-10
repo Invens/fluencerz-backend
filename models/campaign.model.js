@@ -11,10 +11,14 @@ module.exports = (sequelize, DataTypes) => {
     platform: {
       type: DataTypes.ENUM('Instagram', 'YouTube', 'Twitter', 'Telegram', 'Other'),
     },
+    // Add to the attributes
+budget: {
+  type: DataTypes.DECIMAL(10, 2),
+  allowNull: true,
+},
     content_type: {
       type: DataTypes.ENUM(
         "Paid per post",
-        "Barter",
         "Other",
         "Reel",
         "Story",

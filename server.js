@@ -11,6 +11,7 @@ const campaignRoutes = require('./routes/campaign.routes');
 const BrandRequest = require('./routes/brand.routes');
 const InstagramRoutes = require('./routes/instagram.routes');
 const InstagramInsights = require('./routes/InstagramInsight.routes');
+const InfluencerAutoImport = require('./routes/influencer.autoimport.routes');
 
 
 app.use(cors({
@@ -32,6 +33,8 @@ app.use('/api/campaign', campaignRoutes);
 app.use('/api/instagram/', InstagramRoutes);
 app.use('/api/brand', BrandRequest);
 app.use('/connect', InstagramInsights);
+
+app.use('/api/auto-import', InfluencerAutoImport);
 
 
 

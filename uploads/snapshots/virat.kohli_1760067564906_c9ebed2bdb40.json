@@ -1,0 +1,449 @@
+{
+  "id": "17841401935231775",
+  "username": "virat.kohli",
+  "followers_count": 273873559,
+  "follows_count": 284,
+  "media_count": 1038,
+  "profile_picture_url": "https://scontent-iad3-1.xx.fbcdn.net/v/t51.2885-15/331017149_3373809859551320_1963035851400324431_n.jpg?_nc_cat=1&ccb=1-7&_nc_sid=7d201b&_nc_ohc=B1_Tv7qFbLUQ7kNvwG3MdX5&_nc_oc=AdkOGKawsxSKsuJLa9Y1Yim28eA72KxfuOo-rsVUCTuMnS58jyEeYBdkivZqoPBFvxA&_nc_zt=23&_nc_ht=scontent-iad3-1.xx&edm=AL-3X8kEAAAA&oh=00_Afc8yuTKOyBuHHIcog8XOWjUSyZpB9gemWCG-BBsw86OCQ&oe=68EE033E",
+  "name": "Virat Kohli",
+  "website": "http://TIDL.com",
+  "biography": "Carpediem!",
+  "category": null,
+  "average_likes": "7598062.2",
+  "average_comments": "205241.7",
+  "weekly_posts": "0.00",
+  "engagement_rate": "2.849",
+  "comments_to_likes_ratio": "2.701",
+  "followers_to_follows_ratio": "964343.52",
+  "status": 0,
+  "tracked_since": "2020-05-07T21:30:00.000000Z",
+  "updated_at": "2025-10-09T23:05:45.000000Z",
+  "is_favorite": false,
+  "token": null,
+  "profile_history_points": [
+    {
+      "date": "2025-10-09",
+      "followers_count": 273873559,
+      "follows_count": 284,
+      "media_count": 1038,
+      "engagement_rate": "2.849",
+      "average_likes": "7598062.2",
+      "average_comments": "205241.7",
+      "comments_to_likes_ratio": "2.701",
+      "weekly_posts": "0.00"
+    },
+    {
+      "date": "2025-10-08",
+      "followers_count": 273867080,
+      "follows_count": 284,
+      "media_count": 1038,
+      "engagement_rate": "2.843",
+      "average_likes": "7581386.4",
+      "average_comments": "205025.3",
+      "comments_to_likes_ratio": "2.704",
+      "weekly_posts": "0.00"
+    },
+    {
+      "date": "2025-10-07",
+      "followers_count": 273861585,
+      "follows_count": 284,
+      "media_count": 1038,
+      "engagement_rate": "2.839",
+      "average_likes": "7571043.4",
+      "average_comments": "204807.9",
+      "comments_to_likes_ratio": "2.705",
+      "weekly_posts": "0.00"
+    },
+    {
+      "date": "2025-10-06",
+      "followers_count": 273851242,
+      "follows_count": 284,
+      "media_count": 1038,
+      "engagement_rate": "2.833",
+      "average_likes": "7554754.1",
+      "average_comments": "204582.4",
+      "comments_to_likes_ratio": "2.708",
+      "weekly_posts": "0.00"
+    },
+    {
+      "date": "2025-10-05",
+      "followers_count": 273833793,
+      "follows_count": 284,
+      "media_count": 1038,
+      "engagement_rate": "2.823",
+      "average_likes": "7526895.4",
+      "average_comments": "204143.3",
+      "comments_to_likes_ratio": "2.712",
+      "weekly_posts": "0.00"
+    },
+    {
+      "date": "2025-10-04",
+      "followers_count": 273799634,
+      "follows_count": 284,
+      "media_count": 1038,
+      "engagement_rate": "2.819",
+      "average_likes": "7515546.8",
+      "average_comments": "203956.3",
+      "comments_to_likes_ratio": "2.714",
+      "weekly_posts": "0.00"
+    },
+    {
+      "date": "2025-10-03",
+      "followers_count": 273776075,
+      "follows_count": 284,
+      "media_count": 1038,
+      "engagement_rate": "2.806",
+      "average_likes": "7479868.0",
+      "average_comments": "203465.3",
+      "comments_to_likes_ratio": "2.720",
+      "weekly_posts": "1.00"
+    },
+    {
+      "date": "2025-10-02",
+      "followers_count": 273752545,
+      "follows_count": 284,
+      "media_count": 1038,
+      "engagement_rate": "2.803",
+      "average_likes": "7470143.7",
+      "average_comments": "203333.1",
+      "comments_to_likes_ratio": "2.722",
+      "weekly_posts": "1.00"
+    },
+    {
+      "date": "2025-10-01",
+      "followers_count": 273717514,
+      "follows_count": 284,
+      "media_count": 1038,
+      "engagement_rate": "2.793",
+      "average_likes": "7443126.3",
+      "average_comments": "203040.4",
+      "comments_to_likes_ratio": "2.728",
+      "weekly_posts": "1.00"
+    },
+    {
+      "date": "2025-09-30",
+      "followers_count": 273679261,
+      "follows_count": 284,
+      "media_count": 1038,
+      "engagement_rate": "2.778",
+      "average_likes": "7400314.2",
+      "average_comments": "202583.4",
+      "comments_to_likes_ratio": "2.737",
+      "weekly_posts": "1.00"
+    },
+    {
+      "date": "2025-09-29",
+      "followers_count": 273610111,
+      "follows_count": 284,
+      "media_count": 1038,
+      "engagement_rate": "2.755",
+      "average_likes": "7335007.6",
+      "average_comments": "201927.3",
+      "comments_to_likes_ratio": "2.753",
+      "weekly_posts": "1.00"
+    },
+    {
+      "date": "2025-09-28",
+      "followers_count": 273507181,
+      "follows_count": 284,
+      "media_count": 1038,
+      "engagement_rate": "2.969",
+      "average_likes": "7828268.6",
+      "average_comments": "293286.1",
+      "comments_to_likes_ratio": "3.747",
+      "weekly_posts": "1.00"
+    },
+    {
+      "date": "2025-09-27",
+      "followers_count": 273373429,
+      "follows_count": 284,
+      "media_count": 1038,
+      "engagement_rate": "2.959",
+      "average_likes": "7797304.3",
+      "average_comments": "293039.0",
+      "comments_to_likes_ratio": "3.758",
+      "weekly_posts": "0.00"
+    },
+    {
+      "date": "2025-09-26",
+      "followers_count": 273367024,
+      "follows_count": 284,
+      "media_count": 1037,
+      "engagement_rate": "2.959",
+      "average_likes": "7795479.3",
+      "average_comments": "292992.2",
+      "comments_to_likes_ratio": "3.758",
+      "weekly_posts": "0.00"
+    },
+    {
+      "date": "2025-09-25",
+      "followers_count": 273376622,
+      "follows_count": 284,
+      "media_count": 1037,
+      "engagement_rate": "2.958",
+      "average_likes": "7794608.7",
+      "average_comments": "292970.6",
+      "comments_to_likes_ratio": "3.759",
+      "weekly_posts": "0.00"
+    },
+    {
+      "date": "2025-09-24",
+      "followers_count": 273370895,
+      "follows_count": 284,
+      "media_count": 1037,
+      "engagement_rate": "2.957",
+      "average_likes": "7791670.1",
+      "average_comments": "292893.1",
+      "comments_to_likes_ratio": "3.759",
+      "weekly_posts": "0.00"
+    },
+    {
+      "date": "2025-09-23",
+      "followers_count": 273379162,
+      "follows_count": 284,
+      "media_count": 1037,
+      "engagement_rate": "2.957",
+      "average_likes": "7789649.2",
+      "average_comments": "292841.6",
+      "comments_to_likes_ratio": "3.759",
+      "weekly_posts": "0.00"
+    },
+    {
+      "date": "2025-09-22",
+      "followers_count": 273380869,
+      "follows_count": 284,
+      "media_count": 1037,
+      "engagement_rate": "2.956",
+      "average_likes": "7787196.4",
+      "average_comments": "292764.4",
+      "comments_to_likes_ratio": "3.760",
+      "weekly_posts": "1.00"
+    },
+    {
+      "date": "2025-09-21",
+      "followers_count": 273378990,
+      "follows_count": 284,
+      "media_count": 1037,
+      "engagement_rate": "2.955",
+      "average_likes": "7784913.4",
+      "average_comments": "292639.8",
+      "comments_to_likes_ratio": "3.759",
+      "weekly_posts": "1.00"
+    },
+    {
+      "date": "2025-09-20",
+      "followers_count": 273383396,
+      "follows_count": 284,
+      "media_count": 1037,
+      "engagement_rate": "2.954",
+      "average_likes": "7782660.3",
+      "average_comments": "292550.3",
+      "comments_to_likes_ratio": "3.759",
+      "weekly_posts": "1.00"
+    },
+    {
+      "date": "2025-09-19",
+      "followers_count": 273384741,
+      "follows_count": 284,
+      "media_count": 1037,
+      "engagement_rate": "2.953",
+      "average_likes": "7781702.3",
+      "average_comments": "292507.9",
+      "comments_to_likes_ratio": "3.759",
+      "weekly_posts": "1.00"
+    },
+    {
+      "date": "2025-09-18",
+      "followers_count": 273394766,
+      "follows_count": 284,
+      "media_count": 1037,
+      "engagement_rate": "2.952",
+      "average_likes": "7778127.9",
+      "average_comments": "292206.7",
+      "comments_to_likes_ratio": "3.757",
+      "weekly_posts": "1.00"
+    },
+    {
+      "date": "2025-09-17",
+      "followers_count": 273425658,
+      "follows_count": 284,
+      "media_count": 1037,
+      "engagement_rate": "2.951",
+      "average_likes": "7776876.3",
+      "average_comments": "292124.8",
+      "comments_to_likes_ratio": "3.756",
+      "weekly_posts": "1.00"
+    },
+    {
+      "date": "2025-09-16",
+      "followers_count": 273436268,
+      "follows_count": 284,
+      "media_count": 1037,
+      "engagement_rate": "3.319",
+      "average_likes": "8777477.8",
+      "average_comments": "296559.9",
+      "comments_to_likes_ratio": "3.379",
+      "weekly_posts": "1.00"
+    },
+    {
+      "date": "2025-09-15",
+      "followers_count": 273435094,
+      "follows_count": 284,
+      "media_count": 1037,
+      "engagement_rate": "3.318",
+      "average_likes": "8775855.8",
+      "average_comments": "296458.5",
+      "comments_to_likes_ratio": "3.378",
+      "weekly_posts": "1.00"
+    },
+    {
+      "date": "2025-09-14",
+      "followers_count": 273471471,
+      "follows_count": 284,
+      "media_count": 1037,
+      "engagement_rate": "3.316",
+      "average_likes": "8771544.6",
+      "average_comments": "295882.3",
+      "comments_to_likes_ratio": "3.373",
+      "weekly_posts": "0.00"
+    },
+    {
+      "date": "2025-09-13",
+      "followers_count": 273471022,
+      "follows_count": 284,
+      "media_count": 1037,
+      "engagement_rate": "3.315",
+      "average_likes": "8769706.0",
+      "average_comments": "295347.8",
+      "comments_to_likes_ratio": "3.368",
+      "weekly_posts": "0.00"
+    },
+    {
+      "date": "2025-09-12",
+      "followers_count": 273469117,
+      "follows_count": 284,
+      "media_count": 1037,
+      "engagement_rate": "3.314",
+      "average_likes": "8768842.8",
+      "average_comments": "294958.6",
+      "comments_to_likes_ratio": "3.364",
+      "weekly_posts": "0.00"
+    },
+    {
+      "date": "2025-09-11",
+      "followers_count": 273470088,
+      "follows_count": 284,
+      "media_count": 1037,
+      "engagement_rate": "3.313",
+      "average_likes": "8766510.1",
+      "average_comments": "294651.6",
+      "comments_to_likes_ratio": "3.361",
+      "weekly_posts": "0.00"
+    },
+    {
+      "date": "2025-09-10",
+      "followers_count": 273467271,
+      "follows_count": 284,
+      "media_count": 1037,
+      "engagement_rate": "3.313",
+      "average_likes": "8765126.2",
+      "average_comments": "294593.6",
+      "comments_to_likes_ratio": "3.361",
+      "weekly_posts": "0.00"
+    }
+  ],
+  "growth_stats": {
+    "followers_quarterly_growth_rate": -0.04108107700673841,
+    "weekly_followers": 133624.1666666667,
+    "latest_history_point": {
+      "date": "2025-10-08",
+      "followers_count": 273867080,
+      "follows_count": 284,
+      "media_count": 1038,
+      "engagement_rate": "2.843",
+      "average_likes": "7581386.4",
+      "average_comments": "205025.3",
+      "comments_to_likes_ratio": "2.704",
+      "weekly_posts": "0.00"
+    }
+  },
+  "similar_accounts_stats": {
+    "average_likes": {
+      "avg": "2511836.13000",
+      "std": 2191589.6361645325,
+      "min": "79402.6",
+      "max": "8320273.3",
+      "range": 8240870.7
+    },
+    "average_comments": {
+      "avg": "12603.91724",
+      "std": 10565.068231222758,
+      "min": "0.0",
+      "max": "41584.4",
+      "range": 41584.4
+    },
+    "weekly_posts": {
+      "avg": "6.413793",
+      "std": 6.615119783518456,
+      "min": "0.00",
+      "max": "25.00",
+      "range": 25
+    },
+    "engagement_rate": {
+      "avg": "1.2302069",
+      "std": 0.8812112502338157,
+      "min": "0.074",
+      "max": "3.052",
+      "range": 2.978
+    },
+    "weekly_engagement_rate": {
+      "avg": "6.402633333",
+      "std": 5.864366027021922,
+      "min": "0.00000",
+      "max": "23.52500",
+      "range": 23.525
+    },
+    "comments_to_likes_ratio": {
+      "avg": "0.6446207",
+      "std": 0.6170797418873838,
+      "min": "0.000",
+      "max": 2.495859925662151,
+      "range": 2.495859925662151
+    },
+    "followers_to_follows_ratio": {
+      "avg": "821979.992963",
+      "std": 848069.6874436302,
+      "min": "33983.98",
+      "max": 3185968.0318520004,
+      "range": 3151984.0518520004
+    },
+    "followers_growth_rate": {
+      "avg": "9.37813529",
+      "std": 3.2675120196581626,
+      "min": "3.0720",
+      "max": "17.8515",
+      "range": 14.779500000000002
+    },
+    "weekly_followers": {
+      "avg": "813156.1667",
+      "std": 506878.7168652269,
+      "min": -51718,
+      "max": 2317128,
+      "range": 2368846
+    }
+  },
+  "score": {
+    "overall_score": 35.04522818471666,
+    "areas_scores": {
+      "average_likes": 103.20793083736848,
+      "average_comments": 120,
+      "weekly_posts": 0,
+      "engagement_rate": 98.37009116225512,
+      "weekly_engagement_rate": 0,
+      "comments_to_likes_ratio": 113.3243689658392,
+      "followers_to_follows_ratio": 81.67867722599698,
+      "followers_growth_rate": 0,
+      "weekly_followers": 13.146224269214947
+    }
+  }
+}

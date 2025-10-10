@@ -1,10 +1,44 @@
+// routes/brand.js
 const express = require('express');
 const router = express.Router();
 const brandController = require('../controllers/brand.controller');
-const reportController = require('../controllers/report.controller');
 const { verifyToken, requireRole } = require('../middleware/auth.middleware');
-const deliverableController = require('../controllers/deliverable.controller');
-const upload = require('../middleware/upload');
+const upload = require('../middleware/upload'); // Shared upload for general use
+const drive = require('../controllers/drive.controller');
+const reporting = require('../controllers/reporting.controller');
+const path = require('path');
+const multer = require('multer');
+const fs = require('fs');
+
+// Ensure brands upload directory exists
+const BRANDS_UPLOAD_DIR = path.join(__dirname, '..', 'uploads', 'brands');
+if (!fs.existsSync(BRANDS_UPLOAD_DIR)) {
+  fs.mkdirSync(BRANDS_UPLOAD_DIR, { recursive: true });
+  console.log('📁 Created brands upload directory:', BRANDS_UPLOAD_DIR);
+}
+
+// Brand-specific multer configuration (hardcoded to brands folder)
+const brandStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, BRANDS_UPLOAD_DIR);
+  },
+  filename: function (req, file, cb) {
+    const ext = path.extname(file.originalname);
+    const uniqueName = `${Date.now()}-${file.fieldname}${ext}`;
+    cb(null, uniqueName);
+  }
+});
+
+// Reuse the fileFilter from shared upload (assuming it's exported; if not, copy it here)
+const fileFilter = (req, file, cb) => {
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (!['.jpg', '.jpeg', '.png'].includes(ext)) {
+    return cb(new Error('Only JPG, JPEG, PNG files allowed'), false);
+  }
+  cb(null, true);
+};
+
+const brandUpload = multer({ storage: brandStorage, fileFilter });
 
 // Brand dashboard - see all requests & campaigns
 router.get('/dashboard/requests', verifyToken, requireRole('brand'), brandController.getMyRequests);
@@ -15,48 +49,65 @@ router.get('/rating',verifyToken, requireRole('brand'),brandController.ratings);
 router.post('/addRating', verifyToken, requireRole('brand'), brandController.addRating);
 router.get("/profile", verifyToken, requireRole('brand'), brandController.profile);
 router.put('/update', verifyToken, requireRole('brand'), brandController.updateBrandProfile);
-router.patch('/upload-profile', verifyToken, requireRole('brand'), upload.single('image'), brandController.uploadProfileImage);
+router.patch('/upload-profile', verifyToken, requireRole('brand'), brandUpload.single('image'), brandController.uploadProfileImage);
 router.get('/me', verifyToken, requireRole('brand'), brandController.getMyProfile);
 router.get('/list', brandController.brandList);
-router.post('/add-campaign', verifyToken, requireRole('brand'), upload.single('feature_image'), brandController.createCampaign);
+router.post('/add-campaign', verifyToken, requireRole('brand'), brandUpload.single('feature_image'), brandController.createCampaign);
 
 router.get('/campaigns-list',verifyToken, requireRole('brand'),brandController.getMyCampaigns);
-  router.put('/campaigns/:id',verifyToken,requireRole('brand'),upload.single('feature_image'),brandController.updateCampaign);
-  router.get("/campaigns/:id", verifyToken, requireRole("brand"), brandController.getCampaignById);
+router.put('/campaigns/:id',verifyToken,requireRole('brand'),brandUpload.single('feature_image'),brandController.updateCampaign);
+router.get("/campaigns/:id", verifyToken, requireRole("brand"), brandController.getCampaignById);
 
-  
+// New routes for campaign draft, unpublish, and delete
+router.patch('/campaigns/:id/draft', verifyToken, requireRole('brand'), brandController.setCampaignToDraft);
+router.patch('/campaigns/:id/unpublish', verifyToken, requireRole('brand'), brandController.unpublishCampaign);
+router.patch('/campaigns/:id/publish', verifyToken, requireRole('brand'), brandController.publishCampaign);
+router.delete('/campaigns/:id', verifyToken, requireRole('brand'), brandController.deleteCampaign);
+
 router.get('/approved-influencers', verifyToken, requireRole('brand'),brandController.getCampaignApplications);
 router.get('/applications/forwarded', verifyToken, requireRole('brand'), brandController.getForwardedApplications);
 router.post('/applications/:id/decision', verifyToken, requireRole('brand'), brandController.flagApplicationDecision);
 
-
-
-// Deliverables listing for a campaign
+// ✅ NEW: list approved influencers for a campaign (left pane)
 router.get(
-  '/campaigns/:id/deliverables',
+  '/campaigns/:id/drive/influencers',
   verifyToken, requireRole('brand'),
-  deliverableController.getCampaignDeliverables
+  drive.listCampaignInfluencers
 );
 
-// Review a deliverable
+// Enhanced drive list (threads, brand must pass influencer_id in query, influencer sees own)
+router.get(
+  '/campaigns/:id/drive',
+  verifyToken, requireRole('brand'),
+  drive.listAssets
+);
+
+// New: Full thread view
+router.get(
+  '/drive/thread/:bundleId',
+  verifyToken, requireRole('brand'),
+  drive.getThread
+);
+
+// Enhanced review batch (with thread spawn opt)
 router.post(
-  '/deliverables/:deliverableId/review',
-  verifyToken, requireRole(['brand','admin']),
-  reportController.reviewDeliverable
+  '/drive/review',
+  verifyToken, requireRole('brand'),
+  drive.reviewAssets
 );
 
-// Campaign aggregated report (JSON)
-router.get(
-  '/campaigns/:id/report',
-  verifyToken, requireRole(['brand','admin']),
-  reportController.getCampaignReport
+// create a request (now requires influencer_id)
+router.post(
+  '/campaigns/:id/drive/request',
+  verifyToken, requireRole('brand'),
+  drive.requestAsset
 );
 
-// Export campaign report as PDF
+// versions for brand
 router.get(
-  '/campaigns/:id/report/pdf',
-  verifyToken, requireRole(['brand','admin']),
-  reportController.exportCampaignReportPDF
+  '/drive/:fileId/versions',
+  verifyToken, requireRole('brand'),
+  drive.getVersionChain
 );
 
 // ✅ Fetch all influencers
@@ -73,12 +124,48 @@ router.get(
   brandController.getDashboardInsights
 );
 
-
-
 router.post(
   "/recommend-influencers",
   verifyToken,
   requireRole("brand"),
   brandController.recommendInfluencers
 );
+
+// Create / get a report thread for a specific influencer on a campaign
+router.post(
+  '/campaigns/:id/reports/request',
+  verifyToken, requireRole('brand'),
+  reporting.brandRequestReport
+);
+
+// List all report threads for a campaign (brand view)
+router.get(
+  '/campaigns/:id/reports',
+  verifyToken, requireRole('brand'),
+  reporting.brandListThreads
+);
+
+// Review (approve/reject/needs_changes) one or many entries
+router.post(
+  '/reports/review',
+  verifyToken, requireRole('brand'),
+  reporting.reviewEntries
+);
+
+// Versions for an entry (brand allowed via campaign ownership)
+router.get(
+  '/reports/entries/:entryId/versions',
+  verifyToken, requireRole('brand'),
+  reporting.getVersionChain
+);
+
+// Add a comment to a thread
+router.post(
+  '/reports/threads/:threadId/comments',
+  verifyToken, requireRole(['brand','admin']),
+  reporting.addComment
+);
+
+router.post('/reports/entries/:entryId/request', verifyToken, requireRole('brand'), reporting.brandRequestChangesOverEntry);
+
 module.exports = router;

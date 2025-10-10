@@ -1,5 +1,7 @@
 const db = require('../models');
 const { Op, literal } = require('sequelize');
+const { getActor } = require('./_authUtils');
+
 // PATCH /influencer/upload-profile
 exports.uploadProfileImage = async (req, res) => {
   try {
@@ -18,21 +20,28 @@ exports.uploadProfileImage = async (req, res) => {
 };
 
 // GET /influencer/me
+
 exports.getMyProfile = async (req, res) => {
   try {
-    const influencer = await db.Influencer.findByPk(req.user.id, {
-      attributes: {
-        exclude: ['password_hash']
-      }
-    });
+    const { userId, influencer } = await getActor(db, req);
 
     if (!influencer) {
       return res.status(404).json({ message: 'Influencer not found.' });
     }
 
-    res.status(200).json(influencer);
+    // one-time bridge: if this was legacy (found by PK), attach auth_user_id
+    if (!influencer.auth_user_id) {
+      influencer.auth_user_id = userId;
+      await influencer.save();
+    }
+
+    const clean = influencer.toJSON ? influencer.toJSON() : influencer;
+    delete clean.password_hash;
+
+    return res.status(200).json(clean);
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error('getMyProfile error:', err);
+    return res.status(500).json({ message: err.message || 'Internal server error' });
   }
 };
 

@@ -1,11 +1,21 @@
 const db = require('../models');
 const axios = require("axios");
+const fs = require('fs'); // Added for directory creation
+const path = require('path'); // Added for path handling
 const Campaign = db.Campaign;
 const CampaignApplication = db.CampaignApplication;
 const Influencer = db.Influencer;
 const InfluencerInstagramAccount = db.InfluencerInstagramAccount;
 const CampaignDeliverable = db.CampaignDeliverable;
+const { Op } = db.Sequelize; // Added for Op.in query
+const { getActor } = require('./_authUtils');
 
+// Ensure upload directory exists
+const UPLOAD_DIR = path.join(__dirname, '..', 'uploads', 'brands');
+if (!fs.existsSync(UPLOAD_DIR)) {
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+  console.log('📁 Created upload directory:', UPLOAD_DIR);
+}
 
 // ✅ Update brand profile (phone, skype, industry, website)
 exports.updateBrandProfile = async (req, res) => {
@@ -29,7 +39,6 @@ exports.updateBrandProfile = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 
 exports.uploadProfileImage = async (req, res) => {
   try {
@@ -119,11 +128,9 @@ exports.influencers = async (req, res) => {
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
-
-}
+};
 
 exports.campaign = async (req, res) => {
-
   try {
     const brandId = req.user.id;
 
@@ -143,7 +150,7 @@ exports.campaign = async (req, res) => {
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
-}
+};
 
 exports.ratings = async (req, res) => {
   try {
@@ -170,7 +177,7 @@ exports.ratings = async (req, res) => {
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
-}
+};
 
 exports.addRating = async (req, res) => {
   try {
@@ -198,51 +205,61 @@ exports.addRating = async (req, res) => {
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
-}
+};
 
-
+/**
+ * GET /brand/profile
+ * Returns a slimmed/selected set of fields.
+ * Works with:
+ *  - new flow (Users.id in JWT, Brand linked via auth_user_id)
+ *  - legacy flow (Brand.id in JWT) -> auto-bridges to auth_user_id
+ *  - email fallback (if not linked yet)
+ */
 exports.profile = async (req, res) => {
   try {
-    const brand = await db.Brand.findByPk(req.user.id, {
-      attributes: [
-        'company_name',
-        'contact_person',
-        'email',
-        'phone',
-        'skype',
-        'industry',
-        'website',
-        'profile_image'
-      ]
-    });
-
+    const { brand } = await getActor(db, req);
     if (!brand) return res.status(404).json({ message: 'Brand not found' });
 
-    res.json({ message: 'Brand profile fetched', data: brand });
+    const b = brand.toJSON ? brand.toJSON() : brand;
+
+    // Keep the response schema stable
+    const data = {
+      company_name: b.company_name ?? null,
+      contact_person: b.contact_person ?? null,
+      email: b.email ?? null,
+      phone: b.phone ?? '',
+      skype: b.skype ?? '',
+      industry: b.industry ?? null,
+      website: b.website ?? null,
+      profile_image: b.profile_image ?? b.logo_url ?? null,
+    };
+
+    return res.json({ message: 'Brand profile fetched', data });
   } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-}
-
-// GET /brand/me
-exports.getMyProfile = async (req, res) => {
-  try {
-    const influencer = await db.Brand.findByPk(req.user.id, {
-      attributes: {
-        exclude: ['password_hash']
-      }
-    });
-
-    if (!influencer) {
-      return res.status(404).json({ message: 'Influencer not found.' });
-    }
-
-    res.status(200).json(influencer);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error('brand profile error:', err);
+    return res.status(500).json({ message: err.message || 'Internal server error' });
   }
 };
 
+/**
+ * GET /brand/me
+ * Returns the full brand record (minus secrets) for internal screens.
+ * Same bridging behavior as above.
+ */
+exports.getMyProfile = async (req, res) => {
+  try {
+    const { brand } = await getActor(db, req);
+    if (!brand) return res.status(404).json({ message: 'Brand not found.' });
+
+    const data = brand.toJSON ? brand.toJSON() : brand;
+    delete data.password_hash; // never expose
+
+    return res.status(200).json(data);
+  } catch (err) {
+    console.error('brand getMyProfile error:', err);
+    return res.status(500).json({ message: err.message || 'Internal server error' });
+  }
+};
 
 exports.brandList = async (req, res) => {
   try {
@@ -259,9 +276,7 @@ exports.brandList = async (req, res) => {
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
-}
-
-
+};
 
 exports.createCampaign = async (req, res) => {
   try {
@@ -277,12 +292,18 @@ exports.createCampaign = async (req, res) => {
       campaign_requirements,
       guidelines_do,
       guidelines_donot,
+      budget, // New field
       influencer_ids, // optional array
     } = req.body;
 
-    const feature_image = req.file
-      ? `/uploads/brands/${req.file.filename}`
-      : null;
+    // Fixed: Handle req.file safely with logging
+    let feature_image = null;
+    if (req.file) {
+      console.log('📁 File received:', req.file.filename, req.file.size, 'bytes');
+      feature_image = `/uploads/brands/${req.file.filename}`;
+    } else {
+      console.log('⚠️ No file uploaded for feature_image');
+    }
 
     const parseField = (field) => {
       if (!field) return null;
@@ -306,6 +327,7 @@ exports.createCampaign = async (req, res) => {
       campaign_requirements: parseField(campaign_requirements),
       guidelines_do: parseField(guidelines_do),
       guidelines_donot: parseField(guidelines_donot),
+      budget: budget ? parseFloat(budget) : null, // Parse as decimal
       feature_image,
       status: "published",
     });
@@ -317,7 +339,7 @@ exports.createCampaign = async (req, res) => {
         const apps = ids.map((iid) => ({
           influencer_id: iid,
           campaign_id: campaign.id,
-          status: "brand_approved", // ✅ forwarded by brand
+          status: "forwarded", // ✅ forwarded by brand
           forwardedBy: "brand",
         }));
         await CampaignApplication.bulkCreate(apps);
@@ -334,8 +356,6 @@ exports.createCampaign = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
-
-
 
 // ----------------- GET BRAND CAMPAIGNS -----------------
 exports.getMyCampaigns = async (req, res) => {
@@ -368,9 +388,13 @@ exports.updateCampaign = async (req, res) => {
       return res.status(404).json({ success: false, message: "Campaign not found" });
     }
 
+    // Fixed: Handle req.file safely with logging
     let feature_image = campaign.feature_image;
     if (req.file) {
+      console.log('📁 File received for update:', req.file.filename, req.file.size, 'bytes');
       feature_image = `/uploads/brands/${req.file.filename}`;
+    } else {
+      console.log('⚠️ No new file uploaded for feature_image update');
     }
 
     const {
@@ -380,6 +404,7 @@ exports.updateCampaign = async (req, res) => {
       media_kit_link,
       platform,
       content_type,
+      budget,
       eligibility_criteria,
       campaign_requirements,
       guidelines_do,
@@ -403,6 +428,7 @@ exports.updateCampaign = async (req, res) => {
       brief_link,
       media_kit_link,
       platform,
+      budget,
       content_type,
       eligibility_criteria: parseField(eligibility_criteria),
       campaign_requirements: parseField(campaign_requirements),
@@ -418,17 +444,20 @@ exports.updateCampaign = async (req, res) => {
       if (Array.isArray(ids)) {
         // Remove old forwarded applications
         await CampaignApplication.destroy({
-          where: { campaign_id: campaign.id, status: "brand_approved" },
+          where: { campaign_id: campaign.id, status: "forwarded" },
         });
 
+        // Ensure unique IDs to prevent duplicates
+        const uniqueIds = [...new Set(ids)];
+
         // Insert new forwarded applications
-        const apps = ids.map((iid) => ({
+        const apps = uniqueIds.map((iid) => ({
           influencer_id: iid,
           campaign_id: campaign.id,
-          status: "forwarded",
+          status: "approved",
           forwardedBy: "brand",
         }));
-        await CampaignApplication.bulkCreate(apps);
+        await CampaignApplication.bulkCreate(apps, { ignoreDuplicates: true });
       }
     }
 
@@ -442,7 +471,6 @@ exports.updateCampaign = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
-
 
 exports.getCampaignApplications = async (req, res) => {
   try {
@@ -461,7 +489,7 @@ exports.getCampaignApplications = async (req, res) => {
 
     // Get approved applications + influencers
     const approvedApps = await CampaignApplication.findAll({
-      where: { campaign_id: campaignIds, status: 'approved' },
+      where: { campaign_id: { [Op.in]: campaignIds }, status: 'approved' },
       include: [
         {
           model: db.Campaign,
@@ -551,7 +579,6 @@ exports.updateApplicationDecision = async (req, res) => {
   }
 };
 
-
 // Brand reviews only forwarded applications
 exports.flagApplicationDecision = async (req, res) => {
   try {
@@ -598,7 +625,7 @@ exports.getForwardedApplications = async (req, res) => {
         {
           model: db.Campaign,
           where: { brand_id: brandId },
-          attributes: ['id', 'title', 'status']
+          attributes: ['id', 'title', 'status' ,'description']
         },
         {
           model: db.Influencer,
@@ -639,7 +666,6 @@ exports.getForwardedApplications = async (req, res) => {
   }
 };
 
-
 exports.getCampaignById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -670,7 +696,6 @@ exports.getCampaignById = async (req, res) => {
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
-
 
 /**
  * GET /api/brand/influencers
@@ -759,7 +784,6 @@ exports.getInfluencerById = async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
-
 
 exports.getDashboardInsights = async (req, res) => {
   try {
@@ -860,8 +884,6 @@ exports.getDashboardInsights = async (req, res) => {
   }
 };
 
-
-
 exports.recommendInfluencers = async (req, res) => {
   try {
     const campaignDraft = req.body; // campaign form draft from frontend
@@ -926,5 +948,312 @@ Return ONLY influencer IDs in JSON array format. Example: [1,5,7]`,
     res
       .status(500)
       .json({ success: false, message: "AI recommendation failed" });
+  }
+};
+
+// ✅ Set Campaign to Draft
+exports.setCampaignToDraft = async (req, res) => {
+  try {
+    const brandId = req.user.id;
+    const campaignId = req.params.id;
+
+    const campaign = await Campaign.findOne({
+      where: { id: campaignId, brand_id: brandId },
+    });
+
+    if (!campaign) {
+      return res.status(404).json({ success: false, message: "Campaign not found" });
+    }
+
+    await campaign.update({
+      status: "draft",
+    });
+
+    res.json({
+      success: true,
+      message: "Campaign set to draft successfully!",
+      data: campaign,
+    });
+  } catch (err) {
+    console.error("❌ Error setting campaign to draft:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ✅ Unpublish Campaign
+exports.unpublishCampaign = async (req, res) => {
+  try {
+    const brandId = req.user.id;
+    const campaignId = req.params.id;
+
+    const campaign = await Campaign.findOne({
+      where: { id: campaignId, brand_id: brandId },
+    });
+
+    if (!campaign) {
+      return res.status(404).json({ success: false, message: "Campaign not found" });
+    }
+
+    await campaign.update({
+      status: "unpublished",
+    });
+
+    res.json({
+      success: true,
+      message: "Campaign unpublished successfully!",
+      data: campaign,
+    });
+  } catch (err) {
+    console.error("❌ Error unpublishing campaign:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ✅ Delete Campaign
+exports.deleteCampaign = async (req, res) => {
+  try {
+    const brandId = req.user.id;
+    const campaignId = req.params.id;
+
+    const campaign = await Campaign.findOne({
+      where: { id: campaignId, brand_id: brandId },
+    });
+
+    if (!campaign) {
+      return res.status(404).json({ success: false, message: "Campaign not found" });
+    }
+
+    // Optionally delete associated applications
+    await CampaignApplication.destroy({
+      where: { campaign_id: campaignId },
+    });
+
+    await campaign.destroy();
+
+    res.json({
+      success: true,
+      message: "Campaign deleted successfully!",
+    });
+  } catch (err) {
+    console.error("❌ Error deleting campaign:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ✅ Publish Campaign (from draft or unpublished)
+exports.publishCampaign = async (req, res) => {
+  try {
+    const brandId = req.user.id;
+    const campaignId = req.params.id;
+
+    const campaign = await Campaign.findOne({
+      where: { id: campaignId, brand_id: brandId },
+    });
+
+    if (!campaign) {
+      return res.status(404).json({ success: false, message: "Campaign not found" });
+    }
+
+    // Only allow publishing if in draft or unpublished
+    if (campaign.status !== "draft" && campaign.status !== "unpublished") {
+      return res.status(400).json({ success: false, message: "Campaign can only be published from draft or unpublished state" });
+    }
+
+    await campaign.update({
+      status: "published",
+    });
+
+    res.json({
+      success: true,
+      message: "Campaign published successfully!",
+      data: campaign,
+    });
+  } catch (err) {
+    console.error("❌ Error publishing campaign:", err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// GET /brand/campaigns/:id/influencers
+exports.listCampaignInfluencersSimple = async (req, res) => {
+  try {
+    const brandId = req.user.id;
+    const campaignId = req.params.id;
+
+    // Ensure the campaign belongs to this brand
+    const campaign = await db.Campaign.findOne({
+      where: { id: campaignId, brand_id: brandId },
+      attributes: ['id', 'title', 'status']
+    });
+    if (!campaign) {
+      return res.status(404).json({ success: false, message: 'Campaign not found' });
+    }
+
+    const apps = await db.CampaignApplication.findAll({
+      where: { campaign_id: campaignId },
+      attributes: ['id', 'status', 'created_at'],
+      include: [{
+        model: db.Influencer,
+        attributes: ['id', 'full_name', 'profile_image', 'niche', 'followers_count', 'engagement_rate', 'availability']
+      }],
+      order: [['created_at', 'DESC']]
+    });
+
+    return res.json({ success: true, data: { campaign, applications: apps } });
+  } catch (err) {
+    console.error('❌ listCampaignInfluencersSimple error:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// POST /brand/campaigns/:id/influencers/:influencerId
+// Creates (or ignores if exists) a forwarded application for admin/brand review flow
+exports.addInfluencerToCampaign = async (req, res) => {
+  const t = await db.sequelize.transaction();
+  try {
+    const brandId = req.user.id;
+    const campaignId = req.params.id;
+    const influencerId = Number(req.params.influencerId);
+
+    // Validate campaign ownership
+    const campaign = await db.Campaign.findOne({
+      where: { id: campaignId, brand_id: brandId },
+      transaction: t
+    });
+    if (!campaign) {
+      await t.rollback();
+      return res.status(404).json({ success: false, message: 'Campaign not found' });
+    }
+
+    // Validate influencer exists
+    const influencer = await db.Influencer.findByPk(influencerId, { transaction: t });
+    if (!influencer) {
+      await t.rollback();
+      return res.status(404).json({ success: false, message: 'Influencer not found' });
+    }
+
+    // Upsert-like behavior: avoid duplicates
+    const [app, created] = await db.CampaignApplication.findOrCreate({
+      where: { campaign_id: campaignId, influencer_id: influencerId },
+      defaults: {
+        campaign_id: campaignId,
+        influencer_id: influencerId,
+        status: 'forwarded',           // 👈 brand-added = forwarded
+        forwardedBy: 'brand'
+      },
+      transaction: t
+    });
+
+    // If it exists but was previously rejected, optionally re-forward
+    if (!created && app.status === 'rejected') {
+      app.status = 'forwarded';
+      app.forwardedBy = 'brand';
+      await app.save({ transaction: t });
+    }
+
+    await t.commit();
+    return res.json({
+      success: true,
+      message: created ? 'Influencer added to campaign' : 'Influencer already attached to campaign',
+      data: { application: app }
+    });
+  } catch (err) {
+    await t.rollback();
+    console.error('❌ addInfluencerToCampaign error:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// POST /brand/campaigns/:id/influencers
+// Body: { influencer_ids: number[] }
+exports.addInfluencersToCampaign = async (req, res) => {
+  const t = await db.sequelize.transaction();
+  try {
+    const brandId = req.user.id;
+    const campaignId = req.params.id;
+    let { influencer_ids } = req.body;
+
+    if (typeof influencer_ids === 'string') {
+      try { influencer_ids = JSON.parse(influencer_ids); } catch (_e) {}
+    }
+    if (!Array.isArray(influencer_ids) || influencer_ids.length === 0) {
+      await t.rollback();
+      return res.status(400).json({ success: false, message: 'influencer_ids must be a non-empty array' });
+    }
+
+    // Ensure campaign belongs to brand
+    const campaign = await db.Campaign.findOne({
+      where: { id: campaignId, brand_id: brandId },
+      transaction: t
+    });
+    if (!campaign) {
+      await t.rollback();
+      return res.status(404).json({ success: false, message: 'Campaign not found' });
+    }
+
+    // Validate influencers exist
+    const influencers = await db.Influencer.findAll({
+      where: { id: { [Op.in]: influencer_ids } },
+      attributes: ['id'],
+      transaction: t
+    });
+    const validIds = new Set(influencers.map(i => i.id));
+    const toAttach = influencer_ids.filter(id => validIds.has(Number(id)));
+
+    if (toAttach.length === 0) {
+      await t.rollback();
+      return res.status(400).json({ success: false, message: 'No valid influencer IDs provided' });
+    }
+
+    // Find existing links to avoid duplicates
+    const existing = await db.CampaignApplication.findAll({
+      where: {
+        campaign_id: campaignId,
+        influencer_id: { [Op.in]: toAttach }
+      },
+      attributes: ['influencer_id', 'status'],
+      transaction: t
+    });
+    const existingSet = new Set(existing.map(e => Number(e.influencer_id)));
+
+    // Prepare new rows for only non-existing pairs
+    const inserts = toAttach
+      .filter(id => !existingSet.has(Number(id)))
+      .map(id => ({
+        campaign_id: campaignId,
+        influencer_id: id,
+        status: 'forwarded',        // 👈 brand-added = forwarded
+        forwardedBy: 'brand'
+      }));
+
+    if (inserts.length > 0) {
+      await db.CampaignApplication.bulkCreate(inserts, { transaction: t });
+    }
+
+    // Optionally, re-forward any previously rejected in this batch
+    const rejectedToReforward = existing.filter(e => e.status === 'rejected').map(e => e.influencer_id);
+    if (rejectedToReforward.length > 0) {
+      await db.CampaignApplication.update(
+        { status: 'forwarded', forwardedBy: 'brand' },
+        { where: { campaign_id: campaignId, influencer_id: { [Op.in]: rejectedToReforward } }, transaction: t }
+      );
+    }
+
+    await t.commit();
+
+    return res.json({
+      success: true,
+      message: 'Influencers processed',
+      data: {
+        requested: influencer_ids.length,
+        attached: inserts.length,
+        skipped_existing: existingSet.size,
+        reforwarded: rejectedToReforward.length
+      }
+    });
+  } catch (err) {
+    await t.rollback();
+    console.error('❌ addInfluencersToCampaign error:', err);
+    return res.status(500).json({ success: false, message: err.message });
   }
 };
