@@ -1,7 +1,4 @@
 const axios = require('axios');
-const { HttpsProxyAgent } = require('https-proxy-agent');
-
-const PROXY_API_TOKEN = "aafu53k1x9fxahwwxd06ljen1106dsk4jyc8gmo1";
 
 // Multiple Header Configurations for rotation
 const headerConfigs = [
@@ -61,28 +58,20 @@ const headerConfigs = [
 const requestCache = new Map();
 const CACHE_TTL = 300000; // 5 minutes
 
-// Proxy Shuffling - Fisher-Yates shuffle algorithm
-function shuffleArray(array) {
-    const newArray = [...array];
-    for (let i = newArray.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
-    }
-    return newArray;
-}
-
 // Randomized Delays function
-function randomDelay(min = 2000, max = 5000) {
+function randomDelay(min = 3000, max = 8000) {
     const delay = Math.floor(Math.random() * (max - min + 1)) + min;
-    console.log(`Waiting ${delay}ms before next request...`);
+    console.log(`⏳ Waiting ${delay}ms before next request...`);
     return new Promise(resolve => setTimeout(resolve, delay));
 }
 
 // Exponential backoff delay
-function exponentialBackoff(attempt, baseDelay = 1000, maxDelay = 30000) {
+function exponentialBackoff(attempt, baseDelay = 2000, maxDelay = 30000) {
     const delay = Math.min(baseDelay * Math.pow(2, attempt), maxDelay);
-    const jitter = delay * 0.1 * Math.random(); // Add 10% jitter
-    return delay + jitter;
+    const jitter = delay * 0.2 * Math.random(); // Add 20% jitter
+    const totalDelay = delay + jitter;
+    console.log(`📈 Exponential backoff: ${Math.round(totalDelay)}ms (attempt ${attempt})`);
+    return totalDelay;
 }
 
 // Cache cleanup function
@@ -96,59 +85,19 @@ function cleanupCache() {
         }
     }
     if (cleanedCount > 0) {
-        console.log(`Cleaned ${cleanedCount} expired cache entries`);
+        console.log(`🧹 Cleaned ${cleanedCount} expired cache entries`);
     }
 }
 
-// Fetch proxies with Proxy Validation
-async function fetchProxies({ mode = "direct", page = 1, page_size = 25 } = {}) {
-    const url = `https://proxy.webshare.io/api/v2/proxy/list/?mode=${mode}&page=${page}&page_size=${page_size}`;
-    try {
-        console.log(`Fetching ${page_size} proxies from WebShare API...`);
-        const res = await axios.get(url, {
-            headers: {
-                Authorization: `Token ${PROXY_API_TOKEN}`
-            },
-            timeout: 10000
-        });
-        
-        if (!res.data.results) {
-            throw new Error("No results in proxy response");
-        }
-        
-        // Proxy Validation - filter only valid and working proxies
-        const workingProxies = res.data.results.filter(proxy => 
-            proxy.valid && 
-            proxy.last_verification && 
-            proxy.last_verification.success
-        );
-        
-        console.log(`Retrieved ${res.data.results.length} proxies, ${workingProxies.length} are valid and working`);
-        
-        // Proxy Shuffling
-        const shuffledProxies = shuffleArray(workingProxies);
-        
-        return shuffledProxies;
-    } catch (err) {
-        console.error("Proxy API fetch error:", err.response ? err.response.data : err.message);
-        throw err;
-    }
-}
-
-// Main function to fetch Instrack data with proxy
-async function fetchInstrackWithProxy(username, proxyData, headerIndex = 0, attempt = 0) {
-    const proxyUrl = `http://${proxyData.username}:${proxyData.password}@${proxyData.proxy_address}:${proxyData.port}`;
-    const agent = new HttpsProxyAgent(proxyUrl);
-
+// Main function to fetch Instrack data without proxy
+async function fetchInstrackDirect(username, headerIndex = 0, attempt = 0) {
     const url = `https://instrack.app/api/account/${username}`;
     
     // Better Logging
-    console.log(`[Attempt ${attempt + 1}] Trying proxy: ${proxyData.proxy_address}:${proxyData.port} with header set ${headerIndex + 1}`);
+    console.log(`[Attempt ${attempt + 1}] Trying direct connection with header set ${headerIndex + 1}`);
     
     try {
         const response = await axios.get(url, {
-            httpAgent: agent,
-            httpsAgent: agent,
             timeout: 15000,
             headers: headerConfigs[headerIndex % headerConfigs.length],
             // Status Code Handling - only reject on server errors
@@ -159,47 +108,54 @@ async function fetchInstrackWithProxy(username, proxyData, headerIndex = 0, atte
 
         // Better Error Handling for 429 responses
         if (response.status === 429) {
-            console.log(`❌ Rate limited (429) on proxy ${proxyData.proxy_address}`);
+            console.log(`❌ Rate limited (429) - Too many requests`);
             return { 
                 success: false, 
                 rateLimited: true, 
-                status: 429,
-                proxy: proxyData.proxy_address
+                status: 429
             };
         }
 
         if (response.status === 200 && response.data) {
-            console.log(`✅ Success with proxy ${proxyData.proxy_address}`);
+            console.log(`✅ Success with direct connection`);
             return { 
                 success: true, 
                 data: response.data,
-                proxy: proxyData.proxy_address,
                 headerSet: headerIndex + 1
             };
         }
 
-        console.log(`⚠️  Request failed with status ${response.status} on proxy ${proxyData.proxy_address}`);
+        if (response.status === 404) {
+            console.log(`❌ User not found (404) - ${username}`);
+            return { 
+                success: false, 
+                userNotFound: true,
+                status: 404
+            };
+        }
+
+        console.log(`⚠️  Request failed with status ${response.status}`);
         return { 
             success: false, 
-            status: response.status,
-            proxy: proxyData.proxy_address
+            status: response.status
         };
 
     } catch (err) {
         // Better Error Handling
         if (err.code === 'ECONNABORTED') {
-            console.log(`⏰ Timeout on proxy ${proxyData.proxy_address}`);
+            console.log(`⏰ Timeout on direct connection`);
         } else if (err.code === 'ECONNREFUSED') {
-            console.log(`🔌 Connection refused on proxy ${proxyData.proxy_address}`);
+            console.log(`🔌 Connection refused`);
+        } else if (err.code === 'ENOTFOUND') {
+            console.log(`🌐 DNS lookup failed`);
         } else {
-            console.log(`❌ Error on proxy ${proxyData.proxy_address}:`, err.message);
+            console.log(`❌ Error:`, err.message);
         }
         
         return { 
             success: false, 
             error: err.message,
-            code: err.code,
-            proxy: proxyData.proxy_address
+            code: err.code
         };
     }
 }
@@ -223,22 +179,11 @@ exports.getInstrackData = async (req, res) => {
         });
     }
 
-    let proxies = [];
-    try {
-        // Get more proxies for better rotation
-        proxies = await fetchProxies({ page_size: 25 });
-        if (proxies.length === 0) {
-            return res.status(500).json({ error: "No working proxies available" });
-        }
-        console.log(`🔄 Starting request with ${proxies.length} shuffled proxies`);
-    } catch (err) {
-        console.error("Failed to fetch proxies:", err.message);
-        return res.status(500).json({ error: "Failed to fetch proxies" });
-    }
-
     let successData = null;
     let rateLimitedCount = 0;
-    const maxRetries = 3; // Multiple Retry Attempts
+    const maxRetries = 4; // Multiple Retry Attempts
+
+    console.log(`🔄 Starting direct requests for username: ${username}`);
 
     // Main retry loop with Multiple Retry Attempts
     for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -247,46 +192,40 @@ exports.getInstrackData = async (req, res) => {
         // Request Spacing - initial delay between attempts
         if (attempt > 0) {
             const backoffDelay = exponentialBackoff(attempt);
-            console.log(`⏳ Exponential backoff: waiting ${Math.round(backoffDelay)}ms before next attempt`);
             await new Promise(resolve => setTimeout(resolve, backoffDelay));
         }
 
-        // Try each proxy in shuffled order
-        for (let i = 0; i < proxies.length; i++) {
-            const proxy = proxies[i];
-            // Rotate headers for each request
-            const headerIndex = (attempt * proxies.length + i) % headerConfigs.length;
+        // Try with different header configurations
+        const headerIndex = attempt % headerConfigs.length;
+        
+        const result = await fetchInstrackDirect(username, headerIndex, attempt);
+        
+        if (result.success) {
+            successData = result.data;
+            console.log(`🎉 Success on attempt ${attempt + 1} with header set ${result.headerSet}`);
+            break;
+        } else if (result.rateLimited) {
+            rateLimitedCount++;
+            console.log(`🚫 Rate limit count: ${rateLimitedCount}`);
             
-            const result = await fetchInstrackWithProxy(username, proxy, headerIndex, attempt);
-            
-            if (result.success) {
-                successData = result.data;
-                console.log(`🎉 Success on attempt ${attempt + 1} with proxy ${result.proxy} and header set ${result.headerSet}`);
-                break;
-            } else if (result.rateLimited) {
-                rateLimitedCount++;
-                console.log(`🚫 Rate limit count: ${rateLimitedCount}`);
-                
-                // Exponential backoff for rate limits
-                if (rateLimitedCount >= 2) {
-                    const rateLimitDelay = exponentialBackoff(rateLimitedCount, 2000, 15000);
-                    console.log(`⏳ Rate limit backoff: waiting ${Math.round(rateLimitDelay)}ms`);
-                    await new Promise(resolve => setTimeout(resolve, rateLimitDelay));
-                }
+            // More aggressive backoff for rate limits
+            if (rateLimitedCount >= 1) {
+                const rateLimitDelay = exponentialBackoff(rateLimitedCount + 1, 3000, 20000);
+                console.log(`⏳ Rate limit backoff: waiting ${Math.round(rateLimitDelay)}ms`);
+                await new Promise(resolve => setTimeout(resolve, rateLimitDelay));
             }
-            
-            // Request Spacing - wait between proxy attempts (except the last one)
-            if (i < proxies.length - 1 && !successData) {
-                await randomDelay(1500, 4000);
-            }
+        } else if (result.userNotFound) {
+            // If user not found, no need to retry
+            console.log(`❌ User ${username} not found, stopping retries`);
+            return res.status(404).json({ 
+                error: "User not found",
+                username: username
+            });
         }
         
-        if (successData) break;
-        
-        // If no success in this attempt, reshuffle proxies for next attempt
-        if (attempt < maxRetries - 1) {
-            console.log(`❌ Attempt ${attempt + 1} failed, reshuffling proxies for next attempt`);
-            proxies = shuffleArray(proxies);
+        // Request Spacing - wait between attempts if not the last one
+        if (attempt < maxRetries - 1 && !successData) {
+            await randomDelay(4000, 10000);
         }
     }
 
@@ -311,12 +250,24 @@ exports.getInstrackData = async (req, res) => {
     }
 
     // Final error response
-    console.log(`💥 All ${maxRetries} attempts failed for username: ${username}`);
+    console.log(`💥 All ${maxRetries} direct attempts failed for username: ${username}`);
     return res.status(429).json({ 
         error: "Unable to fetch data after multiple attempts. Instrack rate limiting is active.",
         attempts: maxRetries,
-        proxies_tried: proxies.length,
         suggestion: "Try again in a few minutes or use fewer requests.",
+        timestamp: new Date().toISOString()
+    });
+};
+
+// Additional endpoint for health check
+exports.healthCheck = async (req, res) => {
+    const cacheSize = requestCache.size;
+    cleanupCache();
+    
+    return res.json({
+        status: 'healthy',
+        cache_size: cacheSize,
+        header_configs: headerConfigs.length,
         timestamp: new Date().toISOString()
     });
 };
@@ -324,4 +275,4 @@ exports.getInstrackData = async (req, res) => {
 // Optional: Periodic cache cleanup
 setInterval(cleanupCache, 600000); // Clean every 10 minutes
 
-console.log("🔄 Instrack service started with enhanced anti-rate-limiting features");
+console.log("🔄 Instrack service started with enhanced anti-rate-limiting features (Direct Mode)");
