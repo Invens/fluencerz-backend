@@ -7,8 +7,9 @@ const CampaignApplication = db.CampaignApplication;
 const Influencer = db.Influencer;
 const InfluencerInstagramAccount = db.InfluencerInstagramAccount;
 const CampaignDeliverable = db.CampaignDeliverable;
-const { Op } = db.Sequelize; // Added for Op.in query
+const { Op, fn, col } = db.Sequelize;
 const { getActor } = require('./_authUtils');
+
 
 // Ensure upload directory exists
 const UPLOAD_DIR = path.join(__dirname, '..', 'uploads', 'brands');
@@ -17,6 +18,143 @@ if (!fs.existsSync(UPLOAD_DIR)) {
   console.log('📁 Created upload directory:', UPLOAD_DIR);
 }
 
+
+/**
+ * GET /api/brand/applications
+ * Query params:
+ *  - status: comma-separated statuses (e.g. pending,forwarded,brand_forwarded,brand_approved,approved,rejected)
+ *  - campaign_id: number (optional)
+ *  - limit: number (default 50, max 200)
+ *  - offset: number (default 0)
+ *
+ * Returns applications grouped by status for the current brand.
+ */
+exports.getAllApplications = async (req, res) => {
+  try {
+    const brandId = req.user?.brand_id ?? req.user?.id;
+
+    // ---- parse query params
+    const ALL_STATUSES = ['pending', 'forwarded', 'brand_forwarded', 'brand_approved', 'approved', 'rejected'];
+    const statusParam = (req.query.status || '').trim();
+    const statuses = statusParam
+      ? statusParam.split(',').map(s => s.trim()).filter(Boolean)
+      : ALL_STATUSES;
+
+    // validate statuses
+    const invalid = statuses.filter(s => !ALL_STATUSES.includes(s));
+    if (invalid.length) {
+      return res.status(400).json({ message: `Invalid status values: ${invalid.join(', ')}` });
+    }
+
+    const campaignFilterId = req.query.campaign_id ? Number(req.query.campaign_id) : null;
+
+    const limit  = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+
+    // ---- find campaigns owned by brand (and optionally filter by one campaign)
+    const campaignWhere = { brand_id: brandId };
+    if (campaignFilterId) campaignWhere.id = campaignFilterId;
+
+    const campaigns = await db.Campaign.findAll({
+      where: campaignWhere,
+      attributes: ['id', 'title', 'status'],
+    });
+
+    const campaignIds = campaigns.map(c => c.id);
+    if (campaignIds.length === 0) {
+      return res.json({
+        success: true,
+        totals: { all: 0, pending: 0, forwarded: 0, brand_forwarded: 0, brand_approved: 0, approved: 0, rejected: 0 },
+        data: { pending: [], forwarded: [], brand_forwarded: [], brand_approved: [], approved: [], rejected: [] }
+      });
+    }
+
+    // ---- build where for applications
+    const appWhere = {
+      campaign_id: { [Op.in]: campaignIds },
+      status: { [Op.in]: statuses }
+    };
+
+    // ---- robust order by (applied_at exists in your model)
+    const orderClause = [['applied_at', 'DESC']]; // if you ever rename/mapped, switch to createdAt
+
+    // ---- run query
+    const apps = await db.CampaignApplication.findAll({
+      where: appWhere,
+      include: [
+        {
+          model: db.Campaign,
+          where: { id: { [Op.in]: campaignIds } }, // ensures ownership
+          attributes: ['id', 'title', 'status', 'description'],
+        },
+        {
+          model: db.Influencer,
+          attributes: [
+            'id',
+            'full_name',
+            'profile_image',
+            'niche',
+            'followers_count',
+            'engagement_rate',
+            'social_platforms',
+            'followers_by_country',
+            'audience_age_group',
+            'audience_gender',
+            'total_reach',
+            'portfolio',
+            'availability',
+            'created_at'
+          ],
+          include: [
+            {
+              model: db.InfluencerInstagramAccount,
+              as: 'instagramAccount',
+              required: false,
+              attributes: { exclude: ['username', 'email', 'access_token', 'refresh_token'] }
+            }
+          ]
+        }
+      ],
+      order: orderClause,
+      limit,
+      offset
+    });
+
+    // ---- group by status + compute totals
+    const grouped = {
+      pending: [],
+      forwarded: [],
+      brand_forwarded: [],
+      brand_approved: [],
+      approved: [],
+      rejected: []
+    };
+
+    for (const a of apps) {
+      if (grouped[a.status]) grouped[a.status].push(a);
+    }
+
+    const totals = {
+      pending: grouped.pending.length,
+      forwarded: grouped.forwarded.length,
+      brand_forwarded: grouped.brand_forwarded.length,
+      brand_approved: grouped.brand_approved.length,
+      approved: grouped.approved.length,
+      rejected: grouped.rejected.length,
+      all: apps.length
+    };
+
+    return res.json({
+      success: true,
+      totals,
+      pagination: { limit, offset, returned: apps.length },
+      data: grouped
+    });
+  } catch (err) {
+    console.error('[getAllApplications] error:', err);
+    return res.status(500).json({ success: false, message: err.message || 'Internal server error' });
+  }
+};
 // ✅ Update brand profile (phone, skype, industry, website)
 exports.updateBrandProfile = async (req, res) => {
   try {
