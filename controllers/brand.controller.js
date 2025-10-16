@@ -705,7 +705,7 @@ exports.getForwardedApplications = async (req, res) => {
           ]
         }
       ],
-      order: [['created_at', 'DESC']],
+      order: [['applied_at', 'DESC']],
       limit,
       offset
     });
