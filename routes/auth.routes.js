@@ -7,6 +7,7 @@ const { verifyToken } = require('../middleware/auth.middleware');
 // Public
 router.post('/register', auth.register);
 router.post('/login', auth.login);
+router.post('/login-admin', auth.loginasAdmin);
 
 // Protected
 router.get('/me', verifyToken, auth.me);

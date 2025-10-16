@@ -674,3 +674,34 @@ exports.registerInfluencer = async (req, res) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 };
+
+// ✅ Login for All Users
+exports.loginasAdmin = async (req, res) => {
+  const { email, password, userType } = req.body;
+
+  try {
+    let user;
+     if (userType === 'admin') {
+      user = await db.Admin.findOne({ where: { email } });
+    } else {
+      return res.status(400).json({ message: 'Invalid user type.' });
+    }
+
+    if (!user) return res.status(404).json({ message: 'User not found.' });
+
+    const isMatch = await bcrypt.compare(password, user.password_hash);
+    if (!isMatch) return res.status(401).json({ message: 'Incorrect password.' });
+
+    const token = generateToken(user.id, user.role || userType, userType);
+
+    res.status(200).json({
+      message: 'Login successful.',
+      token,
+      userType,
+      role: user.role || userType,
+      user
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Internal server error', error: err.message });
+  }
+};
