@@ -339,7 +339,7 @@ exports.createCampaign = async (req, res) => {
         const apps = ids.map((iid) => ({
           influencer_id: iid,
           campaign_id: campaign.id,
-          status: "forwarded", // ✅ forwarded by brand
+          status: "approved", // ✅ forwarded by brand
           forwardedBy: "brand",
         }));
         await CampaignApplication.bulkCreate(apps);
@@ -474,22 +474,29 @@ exports.updateCampaign = async (req, res) => {
 
 exports.getCampaignApplications = async (req, res) => {
   try {
-    const brandId = req.user.id;
+    const brandId = req.user?.brand_id ?? req.user?.id;
 
-    // Get brand campaigns
+    // ✅ 1. Get campaigns owned by the brand
     const campaigns = await Campaign.findAll({
       where: { brand_id: brandId },
       attributes: ['id', 'title', 'status']
     });
+
     const campaignIds = campaigns.map(c => c.id);
 
     if (campaignIds.length === 0) {
-      return res.json({ message: 'No campaigns found for this brand', campaigns: [] });
+      return res.json({
+        message: 'No campaigns found for this brand',
+        campaigns: []
+      });
     }
 
-    // Get approved applications + influencers
-    const approvedApps = await CampaignApplication.findAll({
-      where: { campaign_id: { [Op.in]: campaignIds }, status: 'approved' },
+    // ✅ 2. Fetch applications with status pending OR approved
+    const applications = await CampaignApplication.findAll({
+      where: {
+        campaign_id: { [Op.in]: campaignIds },
+        status: { [Op.in]: ['approved', 'pending'] }
+      },
       include: [
         {
           model: db.Campaign,
@@ -520,36 +527,48 @@ exports.getCampaignApplications = async (req, res) => {
               as: 'instagramAccount',
               required: false,
               attributes: {
-                exclude: ['username', 'email', 'access_token'] // 🚫 sensitive
+                exclude: ['username', 'email', 'access_token'] // 🚫 keep it safe
               }
             }
           ]
         }
-      ]
+      ],
+      order: [['created_at', 'DESC']]
     });
 
-    // Group influencers under campaigns
+    // ✅ 3. Group influencers by campaign and status
     const grouped = {};
     campaigns.forEach(c => {
-      grouped[c.id] = { id: c.id, title: c.title, status: c.status, influencers: [] };
+      grouped[c.id] = {
+        id: c.id,
+        title: c.title,
+        status: c.status,
+        approved: [],
+        pending: []
+      };
     });
 
-    approvedApps.forEach(app => {
-      if (grouped[app.Campaign.id]) {
-        grouped[app.Campaign.id].influencers.push(app.Influencer);
+    applications.forEach(app => {
+      const campaignId = app.Campaign.id;
+      if (grouped[campaignId]) {
+        if (app.status === 'approved') {
+          grouped[campaignId].approved.push(app.Influencer);
+        } else if (app.status === 'pending') {
+          grouped[campaignId].pending.push(app.Influencer);
+        }
       }
     });
 
-    res.json({
-      message: 'Approved influencers grouped by campaign',
+    // ✅ 4. Return the grouped result
+    return res.json({
+      message: 'Campaign applications grouped by status',
       campaigns: Object.values(grouped)
     });
   } catch (err) {
-    console.error('❌ Error fetching approved influencers:', err);
-    res.status(500).json({ message: 'Internal server error', error: err.message });
+    console.error('❌ Error fetching campaign applications:', err);
+    return res.status(500).json({ message: 'Internal server error', error: err.message });
   }
 };
-
 /**
  * Brand makes final decision (approve/reject)
  */
@@ -617,15 +636,30 @@ exports.flagApplicationDecision = async (req, res) => {
 // Show forwarded applications to brand
 exports.getForwardedApplications = async (req, res) => {
   try {
-    const brandId = req.user.id;
+    // Prefer the brand_id embedded in your JWT; fallback to req.user.id for legacy
+    const brandId =
+      req.user?.brand_id ??
+      req.user?.id ??
+      null;
+
+    if (!brandId) {
+      return res.status(400).json({ message: 'Brand context missing (no brand_id on token).' });
+    }
+
+    // Optional pagination from query
+    const limit  = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+
+    // We want all 3 statuses
+    const STATUSES = ['pending', 'brand_forwarded', 'forwarded'];
 
     const apps = await db.CampaignApplication.findAll({
-      where: { status: 'forwarded' },
+      where: { status: { [Op.in]: STATUSES } },
       include: [
         {
           model: db.Campaign,
           where: { brand_id: brandId },
-          attributes: ['id', 'title', 'status' ,'description']
+          attributes: ['id', 'title', 'status', 'description']
         },
         {
           model: db.Influencer,
@@ -651,18 +685,47 @@ exports.getForwardedApplications = async (req, res) => {
               as: 'instagramAccount',
               required: false,
               attributes: {
-                exclude: ['username', 'email', 'access_token'] // 🚫 sensitive
+                // keep sensitive stuff out
+                exclude: ['username', 'email', 'access_token', 'refresh_token']
               }
             }
           ]
         }
       ],
+      order: [['created_at', 'DESC']],
+      limit,
+      offset
     });
 
-    res.json({ success: true, data: apps });
+    // Group by status for a clean response
+    const grouped = {
+      pending: [],
+      brand_forwarded: [],
+      forwarded: []
+    };
+    for (const a of apps) {
+      const s = a.status;
+      if (grouped[s]) grouped[s].push(a);
+    }
+
+    // Optional: include simple counts
+    const totals = {
+      pending: grouped.pending.length,
+      brand_forwarded: grouped.brand_forwarded.length,
+      forwarded: grouped.forwarded.length,
+      all: apps.length
+    };
+
+    console.log('[Brand Apps] brand_id:', brandId, 'totals:', totals, 'limit/offset:', { limit, offset });
+
+    return res.json({
+      success: true,
+      totals,
+      data: grouped
+    });
   } catch (err) {
-    res.status(500).json({ message: err.message });
-    console.log();
+    console.error('[Brand Apps] error:', err);
+    return res.status(500).json({ message: err.message || 'Internal server error' });
   }
 };
 
