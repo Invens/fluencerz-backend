@@ -599,39 +599,52 @@ exports.updateApplicationDecision = async (req, res) => {
 };
 
 // Brand reviews only forwarded applications
+// Brand reviews forwarded OR pending applications
 exports.flagApplicationDecision = async (req, res) => {
   try {
     const { id } = req.params;
-    const { decision } = req.body; // brand_approved | rejected
+    const { decision } = req.body; // 'brand_approved' | 'rejected'
 
+    const brandId = req.user?.brand_id ?? req.user?.id;
+
+    // Load the application with its campaign to verify ownership
     const app = await db.CampaignApplication.findByPk(id, {
-      include: [{ model: db.Campaign }],
+      include: [{ model: db.Campaign, attributes: ['id', 'brand_id', 'title'] }],
     });
 
-    if (!app || app.Campaign.brand_id !== req.user.id) {
+    if (!app || app?.Campaign?.brand_id !== brandId) {
       return res.status(403).json({ message: 'Not authorized' });
     }
 
-    if (app.status !== 'forwarded') {
-      return res.status(400).json({ message: 'Only forwarded apps can be reviewed by brand' });
+    // Allow review if the app is either 'forwarded' OR 'pending'
+    const reviewable = ['forwarded', 'pending'];
+    if (!reviewable.includes(app.status)) {
+      return res.status(400).json({
+        message: 'Only forwarded or pending applications can be reviewed by brand'
+      });
     }
 
-    if (!['brand_approved', 'rejected'].includes(decision)) {
+    // Only these two decisions are valid
+    if (!['approved', 'rejected'].includes(decision)) {
       return res.status(400).json({ message: 'Invalid decision' });
     }
 
+    const previous_status = app.status;
     app.status = decision;
     await app.save();
 
-    res.json({
+    return res.json({
       success: true,
       message: `Application flagged as ${decision} by brand`,
+      previous_status,
       application: app,
     });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error('[flagApplicationDecision] error:', err);
+    return res.status(500).json({ message: err.message || 'Internal server error' });
   }
 };
+
 
 // Show forwarded applications to brand
 exports.getForwardedApplications = async (req, res) => {
