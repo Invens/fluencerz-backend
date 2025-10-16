@@ -533,7 +533,7 @@ exports.getCampaignApplications = async (req, res) => {
           ]
         }
       ],
-      order: [['created_at', 'DESC']]
+      order: [['applied_at', 'DESC']],
     });
 
     // ✅ 3. Group influencers by campaign and status
@@ -585,7 +585,7 @@ exports.updateApplicationDecision = async (req, res) => {
       return res.status(403).json({ message: 'Not authorized' });
     }
 
-    if (app.status !== 'forwarded') {
+    if (app.status !== 'pending') {
       return res.status(400).json({ message: 'Only forwarded applications can be decided by brand' });
     }
 
