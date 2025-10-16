@@ -675,33 +675,60 @@ exports.registerInfluencer = async (req, res) => {
   }
 };
 
-// ✅ Login for All Users
+// ✅ Admin login (case-insensitive email, robust type check, correct token fn)
 exports.loginasAdmin = async (req, res) => {
-  const { email, password, userType } = req.body;
-
   try {
-    let user;
-     if (userType === 'admin') {
-      user = await db.Admin.findOne({ where: { email } });
-    } else {
+    const rawEmail = req.body?.email || '';
+    const password = req.body?.password || '';
+    const normalizedType = (req.body?.userType || '').trim().toLowerCase();
+
+    if (normalizedType !== 'admin') {
       return res.status(400).json({ message: 'Invalid user type.' });
     }
+    if (!rawEmail || !password) {
+      return res.status(400).json({ message: 'Email and password are required.' });
+    }
 
-    if (!user) return res.status(404).json({ message: 'User not found.' });
+    const lowerEmail = rawEmail.trim().toLowerCase();
 
-    const isMatch = await bcrypt.compare(password, user.password_hash);
-    if (!isMatch) return res.status(401).json({ message: 'Incorrect password.' });
+    // Case-insensitive lookup (same style you used elsewhere)
+    const user = await db.Admin.findOne({
+      where: sequelize.where(
+        sequelize.fn('LOWER', sequelize.col('email')),
+        lowerEmail
+      ),
+      // logging: console.log,  // uncomment to see SQL during debugging
+    });
 
-    const token = generateToken(user.id, user.role || userType, userType);
+    if (!user) {
+      // Optional: quick hint to find common issues
+      // console.error('[ADMIN LOGIN] No admin found for', lowerEmail);
+      return res.status(404).json({ message: 'User not found.' });
+    }
 
-    res.status(200).json({
+    const isMatch = await bcrypt.compare(password, user.password_hash || '');
+    if (!isMatch) {
+      return res.status(401).json({ message: 'Incorrect password.' });
+    }
+
+    // Be explicit: app-level role vs. admin table role
+    const token = signToken({
+      auth_user_id: user.id,
+      role: 'admin',             // app role
+      admin_role: user.role,     // 'super_admin' | 'moderator' from DB
+      admin_id: user.id
+    });
+
+    return res.status(200).json({
       message: 'Login successful.',
       token,
-      userType,
-      role: user.role || userType,
+      userType: 'admin',
+      role: 'admin',
+      admin_role: user.role, // expose if your frontend needs it
       user
     });
   } catch (err) {
-    res.status(500).json({ message: 'Internal server error', error: err.message });
+    console.error('[ADMIN LOGIN] error:', err);
+    return res.status(500).json({ message: 'Internal server error', error: err.message });
   }
 };
