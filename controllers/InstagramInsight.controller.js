@@ -446,7 +446,7 @@ exports.instagramCallback = async (req, res) => {
     console.log("🔀 Redirecting to frontend...");
     
     return res.redirect(
-      `${frontendUrl}/creator/profile/settings?instagram=connected`
+      `${frontendUrl}/creator/profile/?instagram=connected`
     );
   } catch (err) {
     console.log("❌ Instagram callback error:", {
