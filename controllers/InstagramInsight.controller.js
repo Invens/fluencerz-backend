@@ -8,10 +8,9 @@ function log(...args) {
   console.log("[IG]", ...args);
 }
 
-// FIXED: Create a proper sanitize function that doesn't modify the original
 function sanitizeForLog(obj) {
   if (!obj) return obj;
-  const copy = JSON.parse(JSON.stringify(obj)); // Deep clone
+  const copy = JSON.parse(JSON.stringify(obj));
   if (copy.headers?.Authorization) copy.headers.Authorization = "***";
   if (copy.headers?.authorization) copy.headers.authorization = "***";
   if (copy.params?.access_token) copy.params.access_token = "***";
@@ -20,7 +19,6 @@ function sanitizeForLog(obj) {
 }
 
 async function safeRequest(url, options = {}, label = "API REQUEST") {
-  // Log the sanitized version for security
   log(`➡️ ${label}`, sanitizeForLog({ url, ...options }));
   
   try {
@@ -28,13 +26,12 @@ async function safeRequest(url, options = {}, label = "API REQUEST") {
       ...options,
       timeout: 30000,
       validateStatus: function (status) {
-        return status < 500; // Resolve only if the status code is less than 500
+        return status < 500;
       }
     });
     
     log(`✅ ${label} OK`, { status: res.status });
     
-    // Check if response contains error
     if (res.data && res.data.error) {
       log(`❌ ${label} API Error`, res.data.error);
       const error = new Error(res.data.error.message || "Instagram API error");
@@ -45,8 +42,6 @@ async function safeRequest(url, options = {}, label = "API REQUEST") {
     return res.data;
   } catch (err) {
     if (err.response) {
-      // The request was made and the server responded with a status code
-      // that falls out of the range of 2xx
       const payload = err.response.data || { message: err.message };
       log(`❌ ${label} FAIL`, { 
         status: err.response.status,
@@ -57,11 +52,9 @@ async function safeRequest(url, options = {}, label = "API REQUEST") {
       error.code = payload.error?.code || payload.code || err.response.status;
       throw error;
     } else if (err.request) {
-      // The request was made but no response was received
       log(`❌ ${label} FAIL - No Response`, { message: err.message });
       throw new Error("No response from Instagram API");
     } else {
-      // Something happened in setting up the request that triggered an Error
       log(`❌ ${label} FAIL - Setup Error`, { message: err.message });
       throw err;
     }
@@ -75,7 +68,6 @@ async function safeRequestWithRetry(url, options, label, maxRetries = 2) {
       return await safeRequest(url, options, label);
     } catch (err) {
       attempt++;
-      // IG often uses error codes like 4 (rate limit), 2 (service), 17 (user check) → retryable
       const retryable = [2, 4, 17, 613].includes(Number(err.code));
       if (!retryable || attempt > maxRetries) throw err;
       const delay = 1000 * Math.pow(2, attempt - 1);
@@ -85,19 +77,24 @@ async function safeRequestWithRetry(url, options, label, maxRetries = 2) {
   }
 }
 
-// ---------- METRICS SELECTOR ----------
+// ---------- METRICS SELECTOR - UPDATED WITH VALID METRICS ----------
 function getMetricsForType(mediaType) {
+  // Based on Instagram API documentation and the error messages received
+  const commonMetrics = "impressions,reach,likes,comments,saves,shares";
+  const videoMetrics = "impressions,reach,likes,comments,saves,shares,plays,views";
+  const storyMetrics = "impressions,reach,replies,exits";
+  
   switch (mediaType) {
     case "IMAGE":
     case "CAROUSEL_ALBUM":
-      return "engagements,impressions,reach,saved,shares";
+      return commonMetrics;
     case "VIDEO":
     case "REEL":
-      return "engagements,impressions,reach,saved,shares,video_views";
+      return videoMetrics;
     case "STORY":
-      return "exits,impressions,reach,replies,taps_forward,taps_back";
+      return storyMetrics;
     default:
-      return "engagements,impressions,reach";
+      return commonMetrics;
   }
 }
 
@@ -178,28 +175,6 @@ exports.instagramCallback = async (req, res) => {
 
     // 2) Long-lived token
     console.log("🟡 Step 2: Exchanging for long-lived token...");
-    
-    // Test short token first
-    console.log("🟡 Testing short-lived token...");
-    try {
-      const testResponse = await axios.get(
-        `https://graph.instagram.com/me`,
-        {
-          params: {
-            fields: 'id,username',
-            access_token: shortToken
-          },
-          timeout: 30000
-        }
-      );
-      console.log("✅ Short-lived token test successful:", testResponse.data);
-    } catch (testError) {
-      console.log("❌ Short-lived token test failed:", {
-        status: testError.response?.status,
-        data: testError.response?.data,
-        message: testError.message
-      });
-    }
 
     // Get long-lived token
     const longLivedRes = await axios.get(
@@ -224,8 +199,8 @@ exports.instagramCallback = async (req, res) => {
     const igToken = longLivedRes.data.access_token;
     const igTokenExpiresIn = longLivedRes.data.expires_in;
 
-    // Test long-lived token immediately with direct axios call (bypass safeRequest for testing)
-    console.log("🟡 Testing long-lived token with direct call...");
+    // Test long-lived token
+    console.log("🟡 Testing long-lived token...");
     try {
       const testResponse = await axios.get(
         `https://graph.instagram.com/me`,
@@ -237,34 +212,14 @@ exports.instagramCallback = async (req, res) => {
           timeout: 30000
         }
       );
-      console.log("✅ Long-lived token direct test successful:", testResponse.data);
+      console.log("✅ Long-lived token test successful:", testResponse.data);
     } catch (testError) {
-      console.log("❌ Long-lived token direct test failed:", {
+      console.log("❌ Long-lived token test failed:", {
         status: testError.response?.status,
         data: testError.response?.data,
         message: testError.message
       });
       throw new Error(`Long-lived token invalid: ${testError.response?.data?.error?.message || testError.message}`);
-    }
-
-    // Now test with safeRequest to see if it works
-    console.log("🟡 Testing long-lived token with safeRequest...");
-    try {
-      const testResponse = await safeRequest(
-        `https://graph.instagram.com/me`,
-        {
-          params: {
-            fields: 'id,username',
-            access_token: igToken,
-          },
-        },
-        "Token Test"
-      );
-      console.log("✅ Long-lived token safeRequest test successful:", testResponse);
-    } catch (testError) {
-      console.log("❌ Long-lived token safeRequest test failed:", testError.message);
-      // If safeRequest fails but direct call works, there's an issue with safeRequest
-      throw new Error(`safeRequest issue: ${testError.message}`);
     }
 
     // 3) Basic profile
@@ -305,7 +260,7 @@ exports.instagramCallback = async (req, res) => {
     const contentToFetch = allContent.slice(0, MAX_STORE);
     console.log(`📝 Processing ${contentToFetch.length} items for insights`);
 
-    // 5) Media insights
+    // 5) Media insights - with proper error handling
     console.log("🟡 Step 5: Fetching media insights...");
     const mediaWithInsights = await Promise.all(
       contentToFetch.map(async (m, index) => {
@@ -316,6 +271,8 @@ exports.instagramCallback = async (req, res) => {
         
         try {
           const metrics = getMetricsForType(m.media_type);
+          console.log(`   Valid metrics for ${m.media_type}:`, metrics);
+          
           const insights = await safeRequest(
             `https://graph.instagram.com/${m.id}/insights`,
             {
@@ -330,6 +287,7 @@ exports.instagramCallback = async (req, res) => {
           return { ...m, insights };
         } catch (err) {
           console.log(`   ❌ Insights error for ${m.id}:`, err.message);
+          // Return media without insights but with error info
           return {
             ...m,
             insights: null,
@@ -340,93 +298,122 @@ exports.instagramCallback = async (req, res) => {
       })
     );
 
+    const successfulInsights = mediaWithInsights.filter(m => m.insights).length;
+    const failedInsights = mediaWithInsights.filter(m => !m.insights).length;
+    
     console.log("✅ Media insights completed:", {
-      successful: mediaWithInsights.filter(m => m.insights).length,
-      failed: mediaWithInsights.filter(m => !m.insights).length
+      successful: successfulInsights,
+      failed: failedInsights
     });
 
-    // 6) Daily metrics
-    console.log("🟡 Step 6: Fetching daily account insights...");
-    const dayMetrics = ["reach", "impressions"];
+    // 6) Account insights - only fetch available metrics
+    console.log("🟡 Step 6: Fetching account insights...");
     const insightsDay = {};
     
-    for (const metric of dayMetrics) {
-      console.log(`   📈 Fetching daily metric: ${metric}`);
+    // Only fetch metrics that are actually available
+    const availableAccountMetrics = [
+      { name: "reach", period: "day" },
+      { name: "impressions", period: "day" },
+      { name: "profile_views", period: "day" },
+      { name: "website_clicks", period: "day" }
+    ];
+    
+    for (const metric of availableAccountMetrics) {
+      console.log(`   📈 Fetching account metric: ${metric.name}`);
       try {
-        insightsDay[metric] = await safeRequestWithRetry(
+        insightsDay[metric.name] = await safeRequestWithRetry(
           `https://graph.instagram.com/me/insights`,
           {
             params: {
-              metric,
-              period: "day",
+              metric: metric.name,
+              period: metric.period,
               access_token: igToken,
             },
           },
-          `Account Insights (day) - ${metric}`
+          `Account Insights - ${metric.name}`
         );
-        console.log(`   ✅ Daily metric ${metric} received`);
+        console.log(`   ✅ Account metric ${metric.name} received`);
       } catch (err) {
-        console.log(`   ❌ Daily metric ${metric} failed:`, err.message);
-        insightsDay[metric] = { error: err.message, code: err.code };
+        console.log(`   ❌ Account metric ${metric.name} failed:`, err.message);
+        insightsDay[metric.name] = { error: err.message, code: err.code };
       }
     }
 
-    // 7) 30-day / lifetime metrics
-    console.log("🟡 Step 7: Fetching follower count insight...");
-    const insights30Days = {};
+    // 7) Lifetime metrics
+    console.log("🟡 Step 7: Fetching lifetime insights...");
+    const insightsLifetime = {};
     
-    try {
-      insights30Days.follower_count = await safeRequestWithRetry(
-        `https://graph.instagram.com/me/insights`,
-        {
-          params: {
-            metric: "follower_count",
-            period: "lifetime",
-            access_token: igToken,
+    const lifetimeMetrics = [
+      { name: "follower_count", period: "lifetime" },
+      { name: "total_interactions", period: "lifetime" }
+    ];
+    
+    for (const metric of lifetimeMetrics) {
+      console.log(`   📊 Fetching lifetime metric: ${metric.name}`);
+      try {
+        insightsLifetime[metric.name] = await safeRequestWithRetry(
+          `https://graph.instagram.com/me/insights`,
+          {
+            params: {
+              metric: metric.name,
+              period: metric.period,
+              access_token: igToken,
+            },
           },
-        },
-        `Follower Count Insight`
-      );
-      console.log("✅ Follower count insight received");
-    } catch (err) {
-      console.log("❌ Follower count insight failed:", err.message);
-      insights30Days.follower_count = { error: err.message, code: err.code };
+          `Lifetime Insights - ${metric.name}`
+        );
+        console.log(`   ✅ Lifetime metric ${metric.name} received`);
+      } catch (err) {
+        console.log(`   ❌ Lifetime metric ${metric.name} failed:`, err.message);
+        insightsLifetime[metric.name] = { error: err.message, code: err.code };
+      }
     }
 
-    // 8) Aggregates
+    // 8) Aggregates - only calculate if we have successful insights
     console.log("🟡 Step 8: Calculating aggregates...");
-    const contentCount = mediaWithInsights.length || 1;
     
-    const take = (m, metricName) => {
-      if (!m.insights?.data) return 0;
-      const metric = m.insights.data.find(i => i.name === metricName);
-      return Number(metric?.values?.[0]?.value) || 0;
+    let avgs = {
+      avg_likes: 0,
+      avg_comments: 0,
+      avg_reach: 0,
+      avg_views: 0,
     };
+    
+    let engagement_rate = 0;
 
-    const totals = mediaWithInsights.reduce(
-      (acc, m) => ({
-        likes: acc.likes + take(m, "engagements"),
-        comments: acc.comments + take(m, "comments"),
-        reach: acc.reach + take(m, "reach"),
-        views: acc.views + take(m, "video_views"),
-      }),
-      { likes: 0, comments: 0, reach: 0, views: 0 }
-    );
+    if (successfulInsights > 0) {
+      const contentCount = successfulInsights;
+      
+      const take = (m, metricName) => {
+        if (!m.insights?.data) return 0;
+        const metric = m.insights.data.find(i => i.name === metricName);
+        return Number(metric?.values?.[0]?.value) || 0;
+      };
 
-    const avgs = {
-      avg_likes: Number((totals.likes / contentCount).toFixed(2)),
-      avg_comments: Number((totals.comments / contentCount).toFixed(2)),
-      avg_reach: Number((totals.reach / contentCount).toFixed(2)),
-      avg_views: Number((totals.views / contentCount).toFixed(2)),
-    };
+      const totals = mediaWithInsights.reduce(
+        (acc, m) => ({
+          likes: acc.likes + (m.insights ? take(m, "likes") : 0),
+          comments: acc.comments + (m.insights ? take(m, "comments") : 0),
+          reach: acc.reach + (m.insights ? take(m, "reach") : 0),
+          views: acc.views + (m.insights ? take(m, "views") : 0),
+        }),
+        { likes: 0, comments: 0, reach: 0, views: 0 }
+      );
 
-    const engagement_rate = profile.followers_count > 0
-      ? Number((((avgs.avg_likes + avgs.avg_comments) / profile.followers_count) * 100).toFixed(3))
-      : 0;
+      avgs = {
+        avg_likes: Number((totals.likes / contentCount).toFixed(2)),
+        avg_comments: Number((totals.comments / contentCount).toFixed(2)),
+        avg_reach: Number((totals.reach / contentCount).toFixed(2)),
+        avg_views: Number((totals.views / contentCount).toFixed(2)),
+      };
+
+      engagement_rate = profile.followers_count > 0
+        ? Number((((avgs.avg_likes + avgs.avg_comments) / profile.followers_count) * 100).toFixed(3))
+        : 0;
+    }
 
     console.log("✅ Aggregates calculated:", {
-      contentCount,
-      totals,
+      contentCount: successfulInsights,
       avgs,
       engagement_rate
     });
@@ -447,7 +434,7 @@ exports.instagramCallback = async (req, res) => {
       follows_count: profile.follows_count,
       media_count: profile.media_count,
       account_insights_day: insightsDay,
-      account_insights_30days: insights30Days,
+      account_insights_lifetime: insightsLifetime,
       media_with_insights: mediaWithInsights,
       ...avgs,
       engagement_rate,
@@ -558,7 +545,7 @@ exports.getInstagramData = async (req, res) => {
         avg_views: account.avg_views,
         engagement_rate: account.engagement_rate,
         account_insights_day: account.account_insights_day,
-        account_insights_30days: account.account_insights_30days,
+        account_insights_lifetime: account.account_insights_lifetime,
         media_with_insights: account.media_with_insights,
       },
     });
