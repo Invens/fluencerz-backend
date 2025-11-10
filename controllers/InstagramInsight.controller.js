@@ -94,18 +94,34 @@ exports.authInstagram = (req, res) => {
 // ---------- STEP 2: CALLBACK ----------
 exports.instagramCallback = async (req, res) => {
   const { code, state } = req.query;
-  if (!code || !state) return res.status(400).send("Missing authorization code or state");
+  console.log("🔵 Instagram Callback Started - Query Parameters:", { code, state });
+  
+  if (!code || !state) {
+    console.log("❌ Missing authorization code or state");
+    return res.status(400).send("Missing authorization code or state");
+  }
 
   let influencerId;
   try {
     const decoded = jwt.verify(state, process.env.JWT_SECRET);
     influencerId = decoded.influencer_id;
-  } catch {
+    console.log("✅ State JWT verified - Influencer ID:", influencerId);
+  } catch (error) {
+    console.log("❌ JWT verification failed:", error.message);
     return res.status(400).send("Invalid or expired state");
   }
 
   try {
     // 1) Short-lived token
+    console.log("🟡 Step 1: Requesting short-lived token...");
+    console.log("📤 Short-lived token request params:", {
+      client_id: process.env.INSTAGRAM_APP_ID?.substring(0, 10) + "...", // Partial for security
+      client_secret: process.env.INSTAGRAM_APP_SECRET?.substring(0, 10) + "...", // Partial for security
+      grant_type: "authorization_code",
+      redirect_uri: process.env.REDIRECT_URI,
+      code: code.substring(0, 10) + "...", // Partial for security
+    });
+
     const tokenRes = await axios.post(
       "https://api.instagram.com/oauth/access_token",
       new URLSearchParams({
@@ -118,9 +134,23 @@ exports.instagramCallback = async (req, res) => {
       { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
     );
 
+    console.log("✅ Short-lived token response:", {
+      status: tokenRes.status,
+      data: tokenRes.data
+    });
+    
     const { access_token: shortToken, user_id } = tokenRes.data;
+    console.log("🔑 Short-lived token received:", shortToken);
+    console.log("👤 User ID:", user_id);
 
     // 2) Long-lived token (use short-lived to exchange)
+    console.log("🟡 Step 2: Exchanging for long-lived token...");
+    console.log("📤 Long-lived token request params:", {
+      grant_type: "ig_exchange_token",
+      client_secret: process.env.INSTAGRAM_APP_SECRET?.substring(0, 10) + "...",
+      access_token: shortToken.substring(0, 20) + "...", // Partial token for log
+    });
+
     const longLivedRes = await axios.get(
       "https://graph.instagram.com/access_token",
       {
@@ -132,11 +162,26 @@ exports.instagramCallback = async (req, res) => {
       }
     );
 
+    console.log("✅ Long-lived token response:", {
+      status: longLivedRes.status,
+      data: longLivedRes.data
+    });
+
     // pull the actual values out of .data
     const igToken = longLivedRes.data.access_token;
     const igTokenExpiresIn = longLivedRes.data.expires_in;
+    
+    console.log("🔑 Long-lived token received:", igToken);
+    console.log("⏰ Token expires in:", igTokenExpiresIn, "seconds");
 
     // 3) Basic profile
+    console.log("🟡 Step 3: Fetching basic profile...");
+    console.log("📤 Profile request:", {
+      url: `https://graph.instagram.com/v23.0/${user_id}`,
+      token: igToken.substring(0, 20) + "...", // Partial token for log
+      fields: "id,username,name,biography,profile_picture_url,website,followers_count,follows_count,media_count"
+    });
+
     const profile = await safeRequest(
       `https://graph.instagram.com/v23.0/${user_id}`,
       {
@@ -149,18 +194,43 @@ exports.instagramCallback = async (req, res) => {
       "Profile Basic"
     );
 
+    console.log("✅ Profile data received:", {
+      username: profile.username,
+      followers_count: profile.followers_count,
+      media_count: profile.media_count
+    });
+
     // 4) Content pulls
+    console.log("🟡 Step 4: Fetching content...");
+    console.log("📤 Media fetch token:", igToken.substring(0, 20) + "...");
+    
     const media = await fetchAllMedia(igToken);
     const stories = await fetchStories(user_id, igToken);
     const allContent = [...media, ...stories];
 
+    console.log("✅ Content fetched:", {
+      media_count: media.length,
+      stories_count: stories.length,
+      total_content: allContent.length
+    });
+
     const MAX_STORE = 200;
     const contentToFetch = allContent.slice(0, MAX_STORE);
+    console.log(`📝 Processing ${contentToFetch.length} items for insights`);
 
+    console.log("🟡 Step 5: Fetching media insights...");
     const mediaWithInsights = await Promise.all(
-      contentToFetch.map(async (m) => {
+      contentToFetch.map(async (m, index) => {
+        console.log(`📊 Fetching insights for media ${index + 1}/${contentToFetch.length}:`, {
+          id: m.id,
+          media_type: m.media_type,
+          token: igToken.substring(0, 20) + "..."
+        });
+        
         try {
           const metrics = getMetricsForType(m.media_type);
+          console.log(`   Metrics for ${m.media_type}:`, metrics);
+          
           const insights = await safeRequest(
             `https://graph.instagram.com/v23.0/${m.id}/insights`,
             {
@@ -171,8 +241,10 @@ exports.instagramCallback = async (req, res) => {
             },
             `Media Insights ${m.id}`
           );
+          console.log(`   ✅ Insights received for ${m.id}`);
           return { ...m, insights };
         } catch (err) {
+          console.log(`   ❌ Insights error for ${m.id}:`, err.message);
           return {
             ...m,
             insights: null,
@@ -183,7 +255,13 @@ exports.instagramCallback = async (req, res) => {
       })
     );
 
+    console.log("✅ Media insights completed:", {
+      successful: mediaWithInsights.filter(m => m.insights).length,
+      failed: mediaWithInsights.filter(m => !m.insights).length
+    });
+
     // 5) Daily metrics
+    console.log("🟡 Step 6: Fetching daily account insights...");
     const dayMetrics = [
       "accounts_engaged",
       "total_interactions",
@@ -192,7 +270,11 @@ exports.instagramCallback = async (req, res) => {
       "views",
     ];
     const insightsDay = {};
+    
+    console.log("📤 Daily insights token:", igToken.substring(0, 20) + "...");
+    
     for (const metric of dayMetrics) {
+      console.log(`   📈 Fetching daily metric: ${metric}`);
       try {
         insightsDay[metric] = await safeRequestWithRetry(
           `https://graph.instagram.com/v23.0/${user_id}/insights`,
@@ -205,12 +287,15 @@ exports.instagramCallback = async (req, res) => {
           },
           `Account Insights (day) - ${metric}`
         );
+        console.log(`   ✅ Daily metric ${metric} received`);
       } catch (err) {
+        console.log(`   ❌ Daily metric ${metric} failed:`, err.message);
         insightsDay[metric] = { error: err.message, code: err.code };
       }
     }
 
     // 6) 30-day / lifetime metrics
+    console.log("🟡 Step 7: Fetching 30-day/lifetime insights...");
     const insights30Days = {};
     const metrics30Config = [
       {
@@ -222,7 +307,11 @@ exports.instagramCallback = async (req, res) => {
         params: { period: "lifetime", breakdown: "gender,country" },
       },
     ];
+    
+    console.log("📤 30-day insights token:", igToken.substring(0, 20) + "...");
+    
     for (const metric of metrics30Config) {
+      console.log(`   📊 Fetching 30-day metric: ${metric.name}`);
       try {
         insights30Days[metric.name] = await safeRequestWithRetry(
           `https://graph.instagram.com/v23.0/${user_id}/insights`,
@@ -235,12 +324,15 @@ exports.instagramCallback = async (req, res) => {
           },
           `Account Insights (30 days) - ${metric.name}`
         );
+        console.log(`   ✅ 30-day metric ${metric.name} received`);
       } catch (err) {
+        console.log(`   ❌ 30-day metric ${metric.name} failed:`, err.message);
         insights30Days[metric.name] = { error: err.message, code: err.code };
       }
     }
 
     // 7) Aggregates
+    console.log("🟡 Step 8: Calculating aggregates...");
     const contentCount = mediaWithInsights.length || 1;
     const take = (m, n) =>
       m.insights?.data?.find((i) => i.name === n)?.values?.[0]?.value ?? 0;
@@ -272,7 +364,18 @@ exports.instagramCallback = async (req, res) => {
           )
         : 0;
 
+    console.log("✅ Aggregates calculated:", {
+      contentCount,
+      totals,
+      avgs,
+      engagement_rate
+    });
+
     // 8) Persist
+    console.log("🟡 Step 9: Persisting data to database...");
+    console.log("💾 Storing token (full):", igToken);
+    console.log("💾 Token expires at:", new Date(Date.now() + (Number(igTokenExpiresIn) || 0) * 1000));
+    
     await InfluencerInstagramAccount.upsert({
       influencer_id: influencerId,
       ig_user_id: user_id,
@@ -295,15 +398,18 @@ exports.instagramCallback = async (req, res) => {
       updated_at: new Date(),
     });
 
-    log("✅ Instagram connected for influencer:", influencerId);
+    console.log("✅ Instagram connected for influencer:", influencerId);
     const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+    console.log("🔀 Redirecting to:", `${frontendUrl}/dashboard/influencer/settings?instagram=connected`);
+    
     return res.redirect(
       `${frontendUrl}/dashboard/influencer/settings?instagram=connected`
     );
   } catch (err) {
-    log("❌ Instagram callback error:", {
+    console.log("❌ Instagram callback error:", {
       message: err.message,
       code: err.code,
+      stack: err.stack
     });
     return res.status(500).json({ error: "Authentication failed" });
   }
