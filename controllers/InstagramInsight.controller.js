@@ -8,17 +8,22 @@ function log(...args) {
   console.log("[IG]", ...args);
 }
 
-function sanitize(obj) {
+// FIXED: Create a proper sanitize function that doesn't modify the original
+function sanitizeForLog(obj) {
   if (!obj) return obj;
-  const copy = { ...obj };
+  const copy = JSON.parse(JSON.stringify(obj)); // Deep clone
   if (copy.headers?.Authorization) copy.headers.Authorization = "***";
+  if (copy.headers?.authorization) copy.headers.authorization = "***";
   if (copy.params?.access_token) copy.params.access_token = "***";
+  if (copy.data?.access_token) copy.data.access_token = "***";
   return copy;
 }
 
 async function safeRequest(url, options = {}, label = "API REQUEST") {
+  // Log the sanitized version for security
+  log(`➡️ ${label}`, sanitizeForLog({ url, ...options }));
+  
   try {
-    log(`➡️ ${label}`, sanitize({ url, ...options }));
     const res = await axios.get(url, {
       ...options,
       timeout: 30000,
@@ -171,7 +176,7 @@ exports.instagramCallback = async (req, res) => {
     
     const { access_token: shortToken, user_id } = tokenRes.data;
 
-    // 2) Long-lived token - FIXED: Use correct endpoint and parameters
+    // 2) Long-lived token
     console.log("🟡 Step 2: Exchanging for long-lived token...");
     
     // Test short token first
@@ -196,7 +201,7 @@ exports.instagramCallback = async (req, res) => {
       });
     }
 
-    // Get long-lived token - CORRECT ENDPOINT AND PARAMS
+    // Get long-lived token
     const longLivedRes = await axios.get(
       "https://graph.instagram.com/access_token",
       {
@@ -219,8 +224,8 @@ exports.instagramCallback = async (req, res) => {
     const igToken = longLivedRes.data.access_token;
     const igTokenExpiresIn = longLivedRes.data.expires_in;
 
-    // Test long-lived token immediately
-    console.log("🟡 Testing long-lived token...");
+    // Test long-lived token immediately with direct axios call (bypass safeRequest for testing)
+    console.log("🟡 Testing long-lived token with direct call...");
     try {
       const testResponse = await axios.get(
         `https://graph.instagram.com/me`,
@@ -232,9 +237,9 @@ exports.instagramCallback = async (req, res) => {
           timeout: 30000
         }
       );
-      console.log("✅ Long-lived token test successful:", testResponse.data);
+      console.log("✅ Long-lived token direct test successful:", testResponse.data);
     } catch (testError) {
-      console.log("❌ Long-lived token test failed:", {
+      console.log("❌ Long-lived token direct test failed:", {
         status: testError.response?.status,
         data: testError.response?.data,
         message: testError.message
@@ -242,7 +247,27 @@ exports.instagramCallback = async (req, res) => {
       throw new Error(`Long-lived token invalid: ${testError.response?.data?.error?.message || testError.message}`);
     }
 
-    // 3) Basic profile - Use 'me' instead of user_id for better compatibility
+    // Now test with safeRequest to see if it works
+    console.log("🟡 Testing long-lived token with safeRequest...");
+    try {
+      const testResponse = await safeRequest(
+        `https://graph.instagram.com/me`,
+        {
+          params: {
+            fields: 'id,username',
+            access_token: igToken,
+          },
+        },
+        "Token Test"
+      );
+      console.log("✅ Long-lived token safeRequest test successful:", testResponse);
+    } catch (testError) {
+      console.log("❌ Long-lived token safeRequest test failed:", testError.message);
+      // If safeRequest fails but direct call works, there's an issue with safeRequest
+      throw new Error(`safeRequest issue: ${testError.message}`);
+    }
+
+    // 3) Basic profile
     console.log("🟡 Step 3: Fetching basic profile...");
     
     const profile = await safeRequest(
@@ -320,7 +345,7 @@ exports.instagramCallback = async (req, res) => {
       failed: mediaWithInsights.filter(m => !m.insights).length
     });
 
-    // 6) Daily metrics - Only fetch basic metrics to avoid rate limits
+    // 6) Daily metrics
     console.log("🟡 Step 6: Fetching daily account insights...");
     const dayMetrics = ["reach", "impressions"];
     const insightsDay = {};
@@ -346,7 +371,7 @@ exports.instagramCallback = async (req, res) => {
       }
     }
 
-    // 7) 30-day / lifetime metrics - Simplify to avoid complex endpoints
+    // 7) 30-day / lifetime metrics
     console.log("🟡 Step 7: Fetching follower count insight...");
     const insights30Days = {};
     
@@ -381,7 +406,7 @@ exports.instagramCallback = async (req, res) => {
     const totals = mediaWithInsights.reduce(
       (acc, m) => ({
         likes: acc.likes + take(m, "engagements"),
-        comments: acc.comments + take(m, "comments"), // Note: comments might not be available
+        comments: acc.comments + take(m, "comments"),
         reach: acc.reach + take(m, "reach"),
         views: acc.views + take(m, "video_views"),
       }),
@@ -411,7 +436,7 @@ exports.instagramCallback = async (req, res) => {
     
     await InfluencerInstagramAccount.upsert({
       influencer_id: influencerId,
-      ig_user_id: profile.id, // Use profile.id instead of user_id for consistency
+      ig_user_id: profile.id,
       username: profile.username,
       profile_picture_url: profile.profile_picture_url,
       biography: profile.biography,
@@ -468,8 +493,8 @@ async function fetchAllMedia(token) {
       if (Array.isArray(res?.data)) {
         allMedia = allMedia.concat(res.data);
         url = res.paging?.next || null;
-        params = {}; // next URL already contains tokens and fields
-        attempt = 0; // reset attempt counter on success
+        params = {};
+        attempt = 0;
       } else {
         url = null;
       }
@@ -570,7 +595,6 @@ exports.refreshInstagramData = async (req, res) => {
     const expiresAt = new Date(account.token_expires_at);
     const now = new Date();
 
-    // Refresh token if it expires in less than 7 days
     if (!Number.isFinite(expiresAt.getTime()) || (expiresAt - now) / (1000 * 60 * 60 * 24) < 7) {
       console.log("🟡 Refreshing access token...");
       const refreshRes = await axios.get(
@@ -590,7 +614,6 @@ exports.refreshInstagramData = async (req, res) => {
       console.log("✅ Token refreshed");
     }
 
-    // Fetch updated profile
     const profile = await safeRequest(
       `https://graph.instagram.com/me`,
       {
@@ -602,7 +625,6 @@ exports.refreshInstagramData = async (req, res) => {
       "Profile Refresh"
     );
 
-    // Update basic profile data
     account.username = profile.username;
     account.profile_picture_url = profile.profile_picture_url;
     account.biography = profile.biography;
