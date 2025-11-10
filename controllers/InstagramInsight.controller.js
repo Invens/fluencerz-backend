@@ -105,7 +105,7 @@ exports.instagramCallback = async (req, res) => {
   }
 
   try {
-    // Short-lived token
+    // 1) Short-lived token
     const tokenRes = await axios.post(
       "https://api.instagram.com/oauth/access_token",
       new URLSearchParams({
@@ -117,34 +117,44 @@ exports.instagramCallback = async (req, res) => {
       }),
       { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
     );
-    const { access_token, user_id } = tokenRes.data;
 
-    // Long-lived token
-    const longLived = await safeRequest(
+    const { access_token: shortToken, user_id } = tokenRes.data;
+
+    // 2) Long-lived token (use short-lived to exchange)
+    const longLivedRes = await axios.get(
       "https://graph.instagram.com/access_token",
-      { params: { grant_type: "ig_exchange_token", client_secret: process.env.INSTAGRAM_APP_SECRET, access_token } },
-      "Long-lived Token Exchange"
+      {
+        params: {
+          grant_type: "ig_exchange_token",
+          client_secret: process.env.INSTAGRAM_APP_SECRET,
+          access_token: shortToken,
+        },
+      }
     );
 
-    // Basic profile (Graph Basic Display)
+    // pull the actual values out of .data
+    const igToken = longLivedRes.data.access_token;
+    const igTokenExpiresIn = longLivedRes.data.expires_in;
+
+    // 3) Basic profile
     const profile = await safeRequest(
       `https://graph.instagram.com/v23.0/${user_id}`,
       {
         params: {
-          fields: "id,username,name,biography,profile_picture_url,website,followers_count,follows_count,media_count",
-          access_token: longLived.access_token,
+          fields:
+            "id,username,name,biography,profile_picture_url,website,followers_count,follows_count,media_count",
+          access_token: igToken, // <-- use the long-lived token
         },
       },
       "Profile Basic"
     );
 
-    // Content pulls
-    const media = await fetchAllMedia(longLived.access_token);
-    const stories = await fetchStories(user_id, longLived.access_token);
+    // 4) Content pulls
+    const media = await fetchAllMedia(igToken);
+    const stories = await fetchStories(user_id, igToken);
     const allContent = [...media, ...stories];
 
-    // **Limit the number stored to avoid huge DB rows**
-    const MAX_STORE = 200; // tune to your DB column size
+    const MAX_STORE = 200;
     const contentToFetch = allContent.slice(0, MAX_STORE);
 
     const mediaWithInsights = await Promise.all(
@@ -153,24 +163,46 @@ exports.instagramCallback = async (req, res) => {
           const metrics = getMetricsForType(m.media_type);
           const insights = await safeRequest(
             `https://graph.instagram.com/v23.0/${m.id}/insights`,
-            { params: { metric: metrics, access_token: longLived.access_token } },
+            {
+              params: {
+                metric: metrics,
+                access_token: igToken, // <-- use long-lived token
+              },
+            },
             `Media Insights ${m.id}`
           );
           return { ...m, insights };
         } catch (err) {
-          return { ...m, insights: null, _insights_error: err.message, _code: err.code };
+          return {
+            ...m,
+            insights: null,
+            _insights_error: err.message,
+            _code: err.code,
+          };
         }
       })
     );
 
-    // Daily metrics
-    const dayMetrics = ["accounts_engaged", "total_interactions", "reach", "impressions", "views"];
+    // 5) Daily metrics
+    const dayMetrics = [
+      "accounts_engaged",
+      "total_interactions",
+      "reach",
+      "impressions",
+      "views",
+    ];
     const insightsDay = {};
     for (const metric of dayMetrics) {
       try {
         insightsDay[metric] = await safeRequestWithRetry(
           `https://graph.instagram.com/v23.0/${user_id}/insights`,
-          { params: { metric, period: "day", access_token: longLived.access_token } },
+          {
+            params: {
+              metric,
+              period: "day",
+              access_token: igToken, // <-- use long-lived token
+            },
+          },
           `Account Insights (day) - ${metric}`
         );
       } catch (err) {
@@ -178,17 +210,29 @@ exports.instagramCallback = async (req, res) => {
       }
     }
 
-    // 30-day / lifetime metrics
+    // 6) 30-day / lifetime metrics
     const insights30Days = {};
     const metrics30Config = [
-      { name: "engaged_audience_demographics", params: { period: "lifetime", breakdown: "gender,country" } },
-      { name: "follower_demographics", params: { period: "lifetime", breakdown: "gender,country" } },
+      {
+        name: "engaged_audience_demographics",
+        params: { period: "lifetime", breakdown: "gender,country" },
+      },
+      {
+        name: "follower_demographics",
+        params: { period: "lifetime", breakdown: "gender,country" },
+      },
     ];
     for (const metric of metrics30Config) {
       try {
         insights30Days[metric.name] = await safeRequestWithRetry(
           `https://graph.instagram.com/v23.0/${user_id}/insights`,
-          { params: { ...metric.params, metric: metric.name, access_token: longLived.access_token } },
+          {
+            params: {
+              ...metric.params,
+              metric: metric.name,
+              access_token: igToken, // <-- use long-lived token
+            },
+          },
           `Account Insights (30 days) - ${metric.name}`
         );
       } catch (err) {
@@ -196,8 +240,8 @@ exports.instagramCallback = async (req, res) => {
       }
     }
 
-    // -------- aggregates (defensive) --------
-    const contentCount = mediaWithInsights.length || 1; // avoid divide-by-zero
+    // 7) Aggregates
+    const contentCount = mediaWithInsights.length || 1;
     const take = (m, n) =>
       m.insights?.data?.find((i) => i.name === n)?.values?.[0]?.value ?? 0;
 
@@ -218,36 +262,49 @@ exports.instagramCallback = async (req, res) => {
       avg_views: Number((totals.views / contentCount).toFixed(2)),
     };
 
-    const engagement_rate = profile.followers_count > 0
-      ? Number((((avgs.avg_likes + avgs.avg_comments) / profile.followers_count) * 100).toFixed(3))
-      : 0;
+    const engagement_rate =
+      profile.followers_count > 0
+        ? Number(
+            (
+              ((avgs.avg_likes + avgs.avg_comments) / profile.followers_count) *
+              100
+            ).toFixed(3)
+          )
+        : 0;
 
+    // 8) Persist
     await InfluencerInstagramAccount.upsert({
-      influencer_id: influencerId, // entity id
+      influencer_id: influencerId,
       ig_user_id: user_id,
       username: profile.username,
       profile_picture_url: profile.profile_picture_url,
       biography: profile.biography,
       website: profile.website,
-      access_token: longLived.access_token,
-      token_expires_at: new Date(Date.now() + (Number(longLived.expires_in) || 0) * 1000),
+      access_token: igToken, // <-- store long-lived token
+      token_expires_at: new Date(
+        Date.now() + (Number(igTokenExpiresIn) || 0) * 1000
+      ),
       followers_count: profile.followers_count,
       follows_count: profile.follows_count,
       media_count: profile.media_count,
       account_insights_day: insightsDay,
       account_insights_30days: insights30Days,
-      media_with_insights: mediaWithInsights, // trimmed to MAX_STORE
+      media_with_insights: mediaWithInsights,
       ...avgs,
-      engagement_rate, // renamed from total_engagements
+      engagement_rate,
       updated_at: new Date(),
     });
 
     log("✅ Instagram connected for influencer:", influencerId);
     const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
-    // optional: add a small success query so UI can toast
-    return res.redirect(`${frontendUrl}/dashboard/influencer/settings?instagram=connected`);
+    return res.redirect(
+      `${frontendUrl}/dashboard/influencer/settings?instagram=connected`
+    );
   } catch (err) {
-    log("❌ Instagram callback error:", { message: err.message, code: err.code });
+    log("❌ Instagram callback error:", {
+      message: err.message,
+      code: err.code,
+    });
     return res.status(500).json({ error: "Authentication failed" });
   }
 };
