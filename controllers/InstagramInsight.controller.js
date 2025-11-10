@@ -77,24 +77,23 @@ async function safeRequestWithRetry(url, options, label, maxRetries = 2) {
   }
 }
 
-// ---------- METRICS SELECTOR - UPDATED WITH VALID METRICS ----------
+// ---------- METRICS SELECTOR - SIMPLIFIED TO BASIC METRICS ----------
 function getMetricsForType(mediaType) {
-  // Based on Instagram API documentation and the error messages received
-  const commonMetrics = "impressions,reach,likes,comments,saves,shares";
-  const videoMetrics = "impressions,reach,likes,comments,saves,shares,plays,views";
-  const storyMetrics = "impressions,reach,replies,exits";
+  // Use only basic metrics that work for most media types
+  const basicMetrics = "likes,comments,reach,saved,shares";
+  const videoMetrics = "likes,comments,reach,saved,shares,views";
   
   switch (mediaType) {
     case "IMAGE":
     case "CAROUSEL_ALBUM":
-      return commonMetrics;
+      return basicMetrics;
     case "VIDEO":
     case "REEL":
       return videoMetrics;
     case "STORY":
-      return storyMetrics;
+      return "reach,replies";
     default:
-      return commonMetrics;
+      return basicMetrics;
   }
 }
 
@@ -176,7 +175,6 @@ exports.instagramCallback = async (req, res) => {
     // 2) Long-lived token
     console.log("🟡 Step 2: Exchanging for long-lived token...");
 
-    // Get long-lived token
     const longLivedRes = await axios.get(
       "https://graph.instagram.com/access_token",
       {
@@ -260,7 +258,7 @@ exports.instagramCallback = async (req, res) => {
     const contentToFetch = allContent.slice(0, MAX_STORE);
     console.log(`📝 Processing ${contentToFetch.length} items for insights`);
 
-    // 5) Media insights - with proper error handling
+    // 5) Media insights - with simplified metrics and better error handling
     console.log("🟡 Step 5: Fetching media insights...");
     const mediaWithInsights = await Promise.all(
       contentToFetch.map(async (m, index) => {
@@ -271,7 +269,7 @@ exports.instagramCallback = async (req, res) => {
         
         try {
           const metrics = getMetricsForType(m.media_type);
-          console.log(`   Valid metrics for ${m.media_type}:`, metrics);
+          console.log(`   Using metrics for ${m.media_type}:`, metrics);
           
           const insights = await safeRequest(
             `https://graph.instagram.com/${m.id}/insights`,
@@ -287,7 +285,18 @@ exports.instagramCallback = async (req, res) => {
           return { ...m, insights };
         } catch (err) {
           console.log(`   ❌ Insights error for ${m.id}:`, err.message);
-          // Return media without insights but with error info
+          
+          // Check if it's a "pre-conversion" error (posted before business account)
+          if (err.message.includes('पर्सनल अकाउंट') || err.message.includes('personal account') || err.code === 2108006) {
+            console.log(`   ⚠️ Media ${m.id} was posted before business account conversion`);
+            return {
+              ...m,
+              insights: null,
+              _insights_error: "Posted before business account conversion",
+              _code: err.code,
+            };
+          }
+          
           return {
             ...m,
             insights: null,
@@ -306,16 +315,18 @@ exports.instagramCallback = async (req, res) => {
       failed: failedInsights
     });
 
-    // 6) Account insights - only fetch available metrics
+    // 6) Account insights
     console.log("🟡 Step 6: Fetching account insights...");
     const insightsDay = {};
     
-    // Only fetch metrics that are actually available
     const availableAccountMetrics = [
       { name: "reach", period: "day" },
-      { name: "impressions", period: "day" },
       { name: "profile_views", period: "day" },
-      { name: "website_clicks", period: "day" }
+      { name: "website_clicks", period: "day" },
+      { name: "likes", period: "day" },
+      { name: "comments", period: "day" },
+      { name: "shares", period: "day" },
+      { name: "saves", period: "day" }
     ];
     
     for (const metric of availableAccountMetrics) {
@@ -344,7 +355,6 @@ exports.instagramCallback = async (req, res) => {
     const insightsLifetime = {};
     
     const lifetimeMetrics = [
-      { name: "follower_count", period: "lifetime" },
       { name: "total_interactions", period: "lifetime" }
     ];
     
@@ -369,8 +379,87 @@ exports.instagramCallback = async (req, res) => {
       }
     }
 
-    // 8) Aggregates - only calculate if we have successful insights
-    console.log("🟡 Step 8: Calculating aggregates...");
+    // 8) DEMOGRAPHIC DATA - Try multiple approaches
+    console.log("🟡 Step 8: Fetching demographic data...");
+    const audienceDemographics = {};
+
+    // Try different demographic endpoints
+    const demographicMetrics = [
+      { 
+        name: "follower_demographics", 
+        params: { period: "lifetime", breakdown: "gender" },
+        description: "Follower gender demographics"
+      },
+      { 
+        name: "follower_demographics", 
+        params: { period: "lifetime", breakdown: "country" },
+        description: "Follower country demographics"
+      },
+      { 
+        name: "engaged_audience_demographics", 
+        params: { period: "lifetime", breakdown: "gender" },
+        description: "Engaged audience gender"
+      },
+      { 
+        name: "engaged_audience_demographics", 
+        params: { period: "lifetime", breakdown: "country" },
+        description: "Engaged audience country"
+      },
+      { 
+        name: "reached_audience_demographics", 
+        params: { period: "lifetime", breakdown: "gender" },
+        description: "Reached audience gender"
+      },
+      { 
+        name: "reached_audience_demographics", 
+        params: { period: "lifetime", breakdown: "country" },
+        description: "Reached audience country"
+      }
+    ];
+
+    for (const metric of demographicMetrics) {
+      console.log(`   👥 Fetching demographic: ${metric.description}`);
+      try {
+        const result = await safeRequestWithRetry(
+          `https://graph.instagram.com/me/insights`,
+          {
+            params: {
+              metric: metric.name,
+              ...metric.params,
+              access_token: igToken,
+            },
+          },
+          `Demographics - ${metric.name}_${metric.params.breakdown}`
+        );
+        
+        audienceDemographics[`${metric.name}_${metric.params.breakdown}`] = result;
+        console.log(`   ✅ Demographic ${metric.name}_${metric.params.breakdown} received`);
+        
+        // Log the actual data structure
+        if (result?.data && result.data.length > 0) {
+          console.log(`   📊 Data received:`, JSON.stringify(result.data, null, 2).substring(0, 500));
+        } else {
+          console.log(`   📊 No data returned for ${metric.name}_${metric.params.breakdown}`);
+        }
+      } catch (err) {
+        console.log(`   ❌ Demographic ${metric.name}_${metric.params.breakdown} failed:`, err.message);
+        audienceDemographics[`${metric.name}_${metric.params.breakdown}`] = { error: err.message, code: err.code };
+      }
+    }
+
+    // 9) Process and structure demographic data
+    console.log("🟡 Step 9: Processing demographic data...");
+    const processedDemographics = processDemographicData(audienceDemographics);
+    
+    console.log("✅ Processed demographics:", {
+      hasGenderData: !!processedDemographics.gender,
+      hasCountryData: !!processedDemographics.country,
+      genderData: processedDemographics.gender,
+      countryData: processedDemographics.country ? Object.keys(processedDemographics.country).slice(0, 5) : null
+    });
+
+    // 10) Aggregates
+    console.log("🟡 Step 10: Calculating aggregates...");
     
     let avgs = {
       avg_likes: 0,
@@ -418,8 +507,8 @@ exports.instagramCallback = async (req, res) => {
       engagement_rate
     });
 
-    // 9) Persist
-    console.log("🟡 Step 9: Persisting data to database...");
+    // 11) Persist
+    console.log("🟡 Step 11: Persisting data to database...");
     
     await InfluencerInstagramAccount.upsert({
       influencer_id: influencerId,
@@ -435,6 +524,7 @@ exports.instagramCallback = async (req, res) => {
       media_count: profile.media_count,
       account_insights_day: insightsDay,
       account_insights_lifetime: insightsLifetime,
+      audience_demographics: processedDemographics,
       media_with_insights: mediaWithInsights,
       ...avgs,
       engagement_rate,
@@ -442,11 +532,11 @@ exports.instagramCallback = async (req, res) => {
     });
 
     console.log("✅ Instagram connected for influencer:", influencerId);
-    const frontendUrl = process.env.FRONTEND_URL || "https://fluencerz.com";
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
     console.log("🔀 Redirecting to frontend...");
     
     return res.redirect(
-      `${frontendUrl}/creator/profile/?instagram=connected`
+      `${frontendUrl}/creator/profile?instagram=connected`
     );
   } catch (err) {
     console.log("❌ Instagram callback error:", {
@@ -455,12 +545,82 @@ exports.instagramCallback = async (req, res) => {
       response_data: err.response?.data
     });
     
-    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+    const frontendUrl = process.env.FRONTEND_URL || "https://fluencerz.com";
     return res.redirect(
       `${frontendUrl}/creator/profile?instagram=error&message=${encodeURIComponent(err.message)}`
     );
   }
 };
+
+// Helper function to process demographic data
+function processDemographicData(rawDemographics) {
+  const processed = {
+    gender: null,
+    age: null,
+    country: null,
+    city: null,
+    raw_data: rawDemographics
+  };
+
+  try {
+    // Process gender data from various endpoints
+    const genderSources = [
+      'follower_demographics_gender',
+      'engaged_audience_demographics_gender', 
+      'reached_audience_demographics_gender'
+    ];
+
+    for (const source of genderSources) {
+      if (rawDemographics[source]?.data?.[0]?.values?.[0]?.value) {
+        const genderData = {};
+        const genderValues = rawDemographics[source].data[0].values[0].value;
+        
+        genderValues.forEach(item => {
+          if (item.gender && item.percentage) {
+            genderData[item.gender.toLowerCase()] = Number(item.percentage.toFixed(2));
+          }
+        });
+
+        if (Object.keys(genderData).length > 0) {
+          processed.gender = genderData;
+          console.log(`✅ Found gender data in ${source}:`, genderData);
+          break; // Use first valid source
+        }
+      }
+    }
+
+    // Process country data from various endpoints
+    const countrySources = [
+      'follower_demographics_country',
+      'engaged_audience_demographics_country',
+      'reached_audience_demographics_country'
+    ];
+
+    for (const source of countrySources) {
+      if (rawDemographics[source]?.data?.[0]?.values?.[0]?.value) {
+        const countryData = {};
+        const countryValues = rawDemographics[source].data[0].values[0].value;
+        
+        countryValues.forEach(item => {
+          if (item.country && item.percentage) {
+            countryData[item.country] = Number(item.percentage.toFixed(2));
+          }
+        });
+
+        if (Object.keys(countryData).length > 0) {
+          processed.country = countryData;
+          console.log(`✅ Found country data in ${source} with ${Object.keys(countryData).length} countries`);
+          break; // Use first valid source
+        }
+      }
+    }
+
+  } catch (error) {
+    console.log("❌ Error processing demographic data:", error.message);
+  }
+
+  return processed;
+}
 
 async function fetchAllMedia(token) {
   let allMedia = [];
@@ -546,6 +706,7 @@ exports.getInstagramData = async (req, res) => {
         engagement_rate: account.engagement_rate,
         account_insights_day: account.account_insights_day,
         account_insights_lifetime: account.account_insights_lifetime,
+        audience_demographics: account.audience_demographics,
         media_with_insights: account.media_with_insights,
       },
     });
