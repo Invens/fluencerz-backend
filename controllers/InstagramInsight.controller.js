@@ -442,11 +442,11 @@ exports.instagramCallback = async (req, res) => {
     });
 
     console.log("✅ Instagram connected for influencer:", influencerId);
-    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+    const frontendUrl = process.env.FRONTEND_URL || "https://fluencerz.com";
     console.log("🔀 Redirecting to frontend...");
     
     return res.redirect(
-      `${frontendUrl}/dashboard/influencer/settings?instagram=connected`
+      `${frontendUrl}/creator/profile/settings?instagram=connected`
     );
   } catch (err) {
     console.log("❌ Instagram callback error:", {
@@ -457,7 +457,7 @@ exports.instagramCallback = async (req, res) => {
     
     const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
     return res.redirect(
-      `${frontendUrl}/dashboard/influencer/settings?instagram=error&message=${encodeURIComponent(err.message)}`
+      `${frontendUrl}/creator/profile?instagram=error&message=${encodeURIComponent(err.message)}`
     );
   }
 };
