@@ -50,6 +50,32 @@ module.exports = (sequelize, DataTypes) => {
       // Onboarding flag
       is_onboarded: { type: DataTypes.BOOLEAN, defaultValue: false },
 
+      // ========== NEW FIELDS FOR REFLUENCED DATA IMPORT ==========
+      refluenced_raw_data: { 
+        type: DataTypes.JSON, 
+        allowNull: true, 
+        defaultValue: {} 
+      },
+      instagram_posts: { 
+        type: DataTypes.JSON, 
+        allowNull: true, 
+        defaultValue: [] 
+      },
+      performance_metrics: { 
+        type: DataTypes.JSON, 
+        allowNull: true, 
+        defaultValue: {} 
+      },
+      audience_analytics: { 
+        type: DataTypes.JSON, 
+        allowNull: true, 
+        defaultValue: {} 
+      },
+      original_uuid: { 
+        type: DataTypes.STRING, 
+        allowNull: true 
+      },
+
       // Timestamps
       created_at: DataTypes.DATE,
       updated_at: DataTypes.DATE,
@@ -59,8 +85,37 @@ module.exports = (sequelize, DataTypes) => {
       timestamps: true,
       createdAt: "created_at",
       updatedAt: "updated_at",
+      indexes: [
+        {
+          fields: ['original_uuid']
+        },
+        {
+          fields: ['full_name']
+        },
+        {
+          fields: ['email']
+        }
+      ]
     }
   );
+
+  // Associations
+  Influencer.associate = function(models) {
+    Influencer.hasMany(models.CampaignApplication, {
+      foreignKey: 'influencer_id',
+      as: 'applications'
+    });
+    
+    Influencer.hasMany(models.CollabRequest, {
+      foreignKey: 'influencer_id',
+      as: 'collabRequests'
+    });
+    
+    Influencer.hasOne(models.InfluencerInstagramAccount, {
+      foreignKey: 'influencer_id',
+      as: 'instagramAccount'
+    });
+  };
 
   return Influencer;
 };
