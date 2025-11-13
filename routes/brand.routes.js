@@ -50,6 +50,9 @@ router.post('/addRating', verifyToken, requireRole('brand'), brandController.add
 router.get("/profile", verifyToken, requireRole('brand'), brandController.profile);
 router.put('/update', verifyToken, requireRole('brand'), brandController.updateBrandProfile);
 router.patch('/upload-profile', verifyToken, requireRole('brand'), brandUpload.single('image'), brandController.uploadProfileImage);
+
+router.post('/add-to-campaign/:id', verifyToken, requireRole('brand'), brandController.addInfluencersToCampaign);
+
 router.get('/me', verifyToken, requireRole('brand'), brandController.getMyProfile);
 router.get('/list', brandController.brandList);
 router.post('/add-campaign', verifyToken, requireRole('brand'), brandUpload.single('feature_image'), brandController.createCampaign);
