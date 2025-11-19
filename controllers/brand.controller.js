@@ -635,20 +635,116 @@ exports.campaign = async (req, res) => {
     const brandId = req.user.id;
 
     const campaigns = await db.Campaign.findAll({
-      include: {
-        model: db.CollabRequest,
-        where: { brand_id: brandId },
-        include: {
-          model: db.Influencer,
-          attributes: ['full_name', 'email']
+      where: { brand_id: brandId },
+      include: [
+        {
+          model: db.CampaignApplication,
+          // Remove the 'as' or use the correct alias from your model definition
+          required: false,
+          include: [
+            {
+              model: db.Influencer,
+              attributes: ['id', 'full_name', 'email', 'profile_image']
+            }
+          ]
         }
-      },
-      order: [['start_date', 'DESC']]
+      ],
+      order: [['created_at', 'DESC']]
     });
 
-    res.json({ message: 'Your campaigns', data: campaigns });
+    // Transform the data to include influencer counts by status
+    const transformedCampaigns = campaigns.map(campaign => {
+      const campaignData = campaign.toJSON();
+      
+      // Initialize status counters
+      const statusCounts = {
+        approved: 0,
+        pending: 0,
+        forwarded: 0,
+        brand_forwarded: 0,
+        brand_approved: 0,
+        rejected: 0,
+        total: 0
+      };
+
+      // Count influencers by status
+      // Use the correct property name for applications (check your model association)
+      const applications = campaignData.CampaignApplications || campaignData.applications || [];
+      
+      applications.forEach(app => {
+        if (app.status && statusCounts.hasOwnProperty(app.status)) {
+          statusCounts[app.status]++;
+          statusCounts.total++;
+        }
+      });
+
+      // Get influencers grouped by status for detailed view
+      const influencersByStatus = {
+        approved: [],
+        pending: [],
+        forwarded: [],
+        brand_forwarded: [],
+        brand_approved: [],
+        rejected: []
+      };
+
+      applications.forEach(app => {
+        if (app.Influencer && app.status && influencersByStatus[app.status]) {
+          influencersByStatus[app.status].push({
+            id: app.Influencer.id,
+            full_name: app.Influencer.full_name,
+            email: app.Influencer.email,
+            profile_image: app.Influencer.profile_image,
+            application_id: app.id,
+            application_status: app.status,
+            applied_at: app.created_at
+          });
+        }
+      });
+
+      return {
+        id: campaignData.id,
+        brand_id: campaignData.brand_id,
+        title: campaignData.title,
+        description: campaignData.description,
+        brief_link: campaignData.brief_link,
+        media_kit_link: campaignData.media_kit_link,
+        platform: campaignData.platform,
+        budget: campaignData.budget,
+        content_type: campaignData.content_type,
+        eligibility_criteria: campaignData.eligibility_criteria,
+        campaign_requirements: campaignData.campaign_requirements,
+        guidelines_do: campaignData.guidelines_do,
+        guidelines_donot: campaignData.guidelines_donot,
+        feature_image: campaignData.feature_image,
+        status: campaignData.status,
+        start_date: campaignData.start_date,
+        end_date: campaignData.end_date,
+        created_at: campaignData.created_at,
+        updated_at: campaignData.updated_at,
+        
+        // Influencer statistics
+        influencer_stats: statusCounts,
+        
+        // Detailed influencer data grouped by status
+        influencers: influencersByStatus,
+        
+        // Applications count
+        total_applications: statusCounts.total
+      };
+    });
+
+    res.json({ 
+      success: true,
+      message: 'Your campaigns with influencer statistics',
+      data: transformedCampaigns 
+    });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error('❌ Error fetching campaigns with influencer stats:', err);
+    res.status(500).json({ 
+      success: false,
+      message: err.message 
+    });
   }
 };
 
@@ -1186,7 +1282,7 @@ exports.updateApplicationDecision = async (req, res) => {
 exports.flagApplicationDecision = async (req, res) => {
   try {
     const { id } = req.params;
-    const { decision } = req.body; // brand_approved | rejected
+    const { decision } = req.body; // pending | approved | brand_approved | rejected
 
     const app = await db.CampaignApplication.findByPk(id, {
       include: [{ model: db.Campaign }],
@@ -1196,20 +1292,35 @@ exports.flagApplicationDecision = async (req, res) => {
       return res.status(403).json({ message: 'Not authorized' });
     }
 
-    if (app.status !== 'forwarded') {
-      return res.status(400).json({ message: 'Only forwarded apps can be reviewed by brand' });
-    }
-
-    if (!['brand_approved', 'rejected'].includes(decision)) {
-      return res.status(400).json({ message: 'Invalid decision' });
+    // Allow all status changes including pending
+    const allowedDecisions = ['pending', 'approved', 'brand_approved', 'rejected'];
+    
+    if (!allowedDecisions.includes(decision)) {
+      return res.status(400).json({ 
+        message: 'Invalid decision. Use "pending", "approved", "brand_approved" or "rejected"',
+        received: decision,
+        allowed: allowedDecisions
+      });
     }
 
     app.status = decision;
     await app.save();
 
+    // Customize message based on the specific decision
+    let message = '';
+    if (decision === 'brand_approved') {
+      message = 'Application brand approved';
+    } else if (decision === 'approved') {
+      message = 'Application approved';
+    } else if (decision === 'rejected') {
+      message = 'Application rejected';
+    } else if (decision === 'pending') {
+      message = 'Application status reset to pending';
+    }
+
     res.json({
       success: true,
-      message: `Application flagged as ${decision} by brand`,
+      message: message,
       application: app,
     });
   } catch (err) {
@@ -1282,7 +1393,7 @@ exports.getCampaignById = async (req, res) => {
           include: [
             {
               model: db.Influencer,
-              attributes: ["id", "full_name", "profile_image", "followers_count", "engagement_rate"],
+              attributes: ["id", "full_name", "profile_image", "followers_count", "engagement_rate", "niche", "country", "social_platforms", "availability",],
             },
           ],
         },
@@ -1710,6 +1821,7 @@ exports.listCampaignInfluencersSimple = async (req, res) => {
 };
 
 // Creates (or ignores if exists) a forwarded application for admin/brand review flow
+// ✅ FIXED: Add influencer to campaign with pending status
 exports.addInfluencerToCampaign = async (req, res) => {
   const t = await db.sequelize.transaction();
   try {
@@ -1740,7 +1852,7 @@ exports.addInfluencerToCampaign = async (req, res) => {
       defaults: {
         campaign_id: campaignId,
         influencer_id: influencerId,
-        status: 'approved',           // 👈 brand-added = forwarded
+        status: 'pending',           // ✅ FIXED: set to pending instead of approved
         forwardedBy: 'brand'
       },
       transaction: t
@@ -1748,7 +1860,7 @@ exports.addInfluencerToCampaign = async (req, res) => {
 
     // If it exists but was previously rejected, optionally re-forward
     if (!created && app.status === 'rejected') {
-      app.status = 'approved';
+      app.status = 'pending'; // ✅ FIXED: set to pending
       app.forwardedBy = 'brand';
       await app.save({ transaction: t });
     }
@@ -1766,7 +1878,7 @@ exports.addInfluencerToCampaign = async (req, res) => {
   }
 };
 
-// POST /brand/campaigns/:id/influencers
+// ✅ FIXED: Add multiple influencers to campaign with pending status
 // Body: { influencer_ids: number[] }
 exports.addInfluencersToCampaign = async (req, res) => {
   const t = await db.sequelize.transaction();
@@ -1824,7 +1936,7 @@ exports.addInfluencersToCampaign = async (req, res) => {
       .map(id => ({
         campaign_id: campaignId,
         influencer_id: id,
-        status: 'approved',        // 👈 brand-added = forwarded
+        status: 'pending',        // ✅ FIXED: set to pending instead of approved
         forwardedBy: 'brand'
       }));
 
@@ -1836,7 +1948,7 @@ exports.addInfluencersToCampaign = async (req, res) => {
     const rejectedToReforward = existing.filter(e => e.status === 'rejected').map(e => e.influencer_id);
     if (rejectedToReforward.length > 0) {
       await db.CampaignApplication.update(
-        { status: 'approved', forwardedBy: 'brand' },
+        { status: 'pending', forwardedBy: 'brand' }, // ✅ FIXED: set to pending
         { where: { campaign_id: campaignId, influencer_id: { [Op.in]: rejectedToReforward } }, transaction: t }
       );
     }
