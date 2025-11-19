@@ -19,6 +19,85 @@ if (!fs.existsSync(UPLOAD_DIR)) {
 }
 
 
+const COUNTRY_VARIANTS = {
+  Germany: ["Germany", "germany", "de", "deutschland"],
+  Switzerland: ["Switzerland", "switzerland", "ch"],
+  Austria: ["Austria", "austria", "at", "österreich", "osterreich"],
+  "United Kingdom": [
+    "United Kingdom",
+    "united kingdom",
+    "united kingdo",
+    "uk",
+    "u.k.",
+    "england",
+    "great britain",
+    "gb",
+  ],
+  "United States": [
+    "United States",
+    "united states",
+    "united state",
+    "usa",
+    "u.s.a.",
+    "us",
+    "u.s.",
+    "united states of america",
+  ],
+  "United Arab Emirates": [
+    "United Arab Emirates",
+    "united arab emirates",
+    "uae",
+    "u.a.e.",
+    "dubai",
+    "abu dhabi",
+    "abudhabi",
+    "sharjah",
+    "ajman",
+    "ras al khaimah",
+    "fujairah",
+    "umm al quwain",
+  ],
+};
+
+
+// Flat list of all "non-India" country variants (used for India filter)
+const GLOBAL_NOT_INDIA_VALUES = Object.values(COUNTRY_VARIANTS).flat();
+
+/**
+ * Normalize raw DB country value into:
+ *  - "Germany" | "Switzerland" | "Austria" | "United Kingdom" | "United States"
+ *  - OR "India" for everything else
+ */
+function normalizeCountry(raw) {
+  if (!raw) return "India";
+  let v = String(raw).trim();
+  if (!v) return "India";
+
+  // If we have something like "Delhi, India" or "Mumbai, Maharashtra, India"
+  if (v.includes(",")) {
+    const parts = v
+      .split(",")
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (parts.length) {
+      // last part is usually the country
+      v = parts[parts.length - 1];
+    }
+  }
+
+  const lower = v.toLowerCase();
+
+  // Check if it matches any known global country variants
+  for (const [label, variants] of Object.entries(COUNTRY_VARIANTS)) {
+    if (variants.some((vv) => vv.toLowerCase() === lower)) {
+      return label; // e.g. "Germany"
+    }
+  }
+
+  // Everything else (states, cities, unknowns) => India
+  return "India";
+}
+
 /**
  * GET /api/brand/applications
  * Query params:
@@ -258,48 +337,296 @@ exports.getBrandOverview = async (req, res) => {
 };
 
 // controllers/brandController.js
+
 exports.influencers = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 100;
+    const page  = parseInt(req.query.page, 10) || 1;
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 200);
     const offset = (page - 1) * limit;
 
-    // First, let's check the structure of one influencer to see available columns
+    const where = {};
 
-    const { count, rows: influencers } = await db.Influencer.findAndCountAll({
+    // search by name / email
+    if (req.query.search) {
+      const q = req.query.search.trim();
+      if (q) {
+        where[Op.or] = [
+          { full_name: { [Op.like]: `%${q}%` } },
+          { email: { [Op.like]: `%${q}%` } },
+        ];
+      }
+    }
+
+    // niche exact match
+    if (req.query.niche) {
+      where.niche = req.query.niche.trim();
+    }
+
+    // country filter with special rule:
+    // - Germany / Switzerland / Austria / United Kingdom / United States = their own clusters
+    // - Everything else = India
+    if (req.query.country) {
+      const requested = req.query.country.trim();
+      const normalized = normalizeCountry(requested); // Germany, Switzerland, Austria, United Kingdom, United States, India
+
+      if (!where[Op.and]) where[Op.and] = [];
+
+      if (normalized === "India") {
+        // India means: NOT any of the known global variants, OR country null/empty
+        where[Op.and].push({
+          [Op.or]: [
+            { country: { [Op.notIn]: GLOBAL_NOT_INDIA_VALUES } },
+            { country: null },
+            { country: "" },
+          ],
+        });
+      } else if (COUNTRY_VARIANTS[normalized]) {
+        // Global countries: match any of their variants
+        where[Op.and].push({
+          country: {
+            [Op.in]: COUNTRY_VARIANTS[normalized],
+          },
+        });
+      } else {
+        // Fallback: exact match
+        where[Op.and].push({ country: requested });
+      }
+    }
+
+    // availability = available | unavailable
+    if (req.query.availability) {
+      const allowed = ['available', 'unavailable'];
+      const value = req.query.availability.trim().toLowerCase();
+      if (allowed.includes(value)) {
+        where.availability = value;
+      }
+    }
+
+    // onboarded filter
+    if (req.query.is_onboarded === 'true') {
+      where.is_onboarded = true;
+    } else if (req.query.is_onboarded === 'false') {
+      where.is_onboarded = false;
+    }
+
+    // followers range
+    if (req.query.min_followers || req.query.max_followers) {
+      where.followers_count = {};
+      if (req.query.min_followers) {
+        where.followers_count[Op.gte] = parseInt(req.query.min_followers, 10) || 0;
+      }
+      if (req.query.max_followers) {
+        where.followers_count[Op.lte] = parseInt(req.query.max_followers, 10) || 0;
+      }
+    }
+
+    // engagement rate range (in %)
+    if (req.query.min_engagement || req.query.max_engagement) {
+      where.engagement_rate = {};
+      if (req.query.min_engagement) {
+        where.engagement_rate[Op.gte] = parseFloat(req.query.min_engagement);
+      }
+      if (req.query.max_engagement) {
+        where.engagement_rate[Op.lte] = parseFloat(req.query.max_engagement);
+      }
+    }
+
+    const sortableFields = ['id', 'followers_count', 'engagement_rate', 'created_at'];
+    let sortBy = 'id';
+    let sortDir = 'DESC';
+
+    if (req.query.sort_by && sortableFields.includes(req.query.sort_by)) {
+      sortBy = req.query.sort_by;
+    }
+
+    if (req.query.sort_dir && ['ASC', 'DESC'].includes(req.query.sort_dir.toUpperCase())) {
+      sortDir = req.query.sort_dir.toUpperCase();
+    }
+
+    const { count, rows } = await db.Influencer.findAndCountAll({
+      where,
       attributes: [
-        'id', 
-        'full_name', 
-        'niche', 
-        'followers_count', 
-        'social_platforms', 
+        'id',
+        'auth_user_id',
+        'full_name',
+        'email',
+        'phone',
+        'skype',
         'profile_image',
+        'profile_picture',
+        'niche',
+        'followers_count',
         'engagement_rate',
-        'availability',
-        'audience_age_group',
+        'total_reach',
+        'social_platforms',
         'followers_by_country',
-        'audience_gender'
+        'audience_age_group',
+        'audience_gender',
+        'country',
+        'categories',
+        'communication_channel',
+        'portfolio',
+        'availability',
+        'is_onboarded',
+        'refluenced_raw_data',
+        'instagram_posts',
+        'performance_metrics',
+        'audience_analytics',
+        'original_uuid',
+        'created_at',
+        'updated_at',
       ],
-      limit: limit,
-      offset: offset,
-      order: [['id', 'DESC']] // Safe fallback - every table should have an id
+      limit,
+      offset,
+      order: [[sortBy, sortDir]],
     });
 
     const totalPages = Math.ceil(count / limit);
 
-    res.json({
+    const influencers = rows.map((row) => {
+      const inf = row.toJSON();
+
+      const socialPlatforms = Array.isArray(inf.social_platforms) ? inf.social_platforms : [];
+      const followersByCountry = Array.isArray(inf.followers_by_country) ? inf.followers_by_country : [];
+      const categories = Array.isArray(inf.categories) ? inf.categories : [];
+      const instagramPosts = Array.isArray(inf.instagram_posts) ? inf.instagram_posts : [];
+
+      const totalSocialFollowers = socialPlatforms.reduce(
+        (sum, p) => sum + (parseInt(p.followers, 10) || 0),
+        0
+      );
+
+      return {
+        id: inf.id,
+        auth_user_id: inf.auth_user_id,
+
+        // Basic profile
+        profile: {
+          full_name: inf.full_name,
+          email: inf.email,
+          phone: inf.phone,
+          skype: inf.skype,
+          country: inf.country,
+          profile_image: inf.profile_image || inf.profile_picture || null,
+          categories,
+          portfolio: inf.portfolio,
+          availability: inf.availability,
+          is_onboarded: inf.is_onboarded,
+        },
+
+        // Niche & metrics
+        metrics: {
+          niche: inf.niche,
+          followers_count: inf.followers_count,
+          engagement_rate: inf.engagement_rate,
+          total_reach: inf.total_reach,
+          total_social_followers: totalSocialFollowers,
+          performance_metrics: inf.performance_metrics || {},
+        },
+
+        // Audience data
+        audience: {
+          age_group: inf.audience_age_group,
+          gender_split: inf.audience_gender || { male: 0, female: 0, other: 0 },
+          followers_by_country: followersByCountry,
+          analytics: inf.audience_analytics || {},
+        },
+
+        // Social & communication
+        socials: {
+          social_platforms: socialPlatforms,
+          communication_channel: inf.communication_channel || {},
+          instagram_posts: instagramPosts,
+        },
+
+        // Raw import / meta
+        import_meta: {
+          original_uuid: inf.original_uuid,
+          refluenced_raw_data: inf.refluenced_raw_data || {},
+        },
+
+        created_at: inf.created_at,
+        updated_at: inf.updated_at,
+      };
+    });
+
+    return res.json({
       influencers,
       pagination: {
         currentPage: page,
+        perPage: limit,
         totalPages,
         totalInfluencers: count,
         hasNext: page < totalPages,
-        hasPrev: page > 1
-      }
+        hasPrev: page > 1,
+      },
+      appliedFilters: {
+        search: req.query.search || null,
+        niche: req.query.niche || null,
+        country: req.query.country || null,
+        availability: req.query.availability || null,
+        is_onboarded: req.query.is_onboarded ?? null,
+        min_followers: req.query.min_followers || null,
+        max_followers: req.query.max_followers || null,
+        min_engagement: req.query.min_engagement || null,
+        max_engagement: req.query.max_engagement || null,
+        sort_by: sortBy,
+        sort_dir: sortDir,
+      },
     });
   } catch (err) {
     console.error('Error fetching influencers:', err);
-    res.status(500).json({ message: err.message });
+    return res.status(500).json({ message: err.message || 'Failed to fetch influencers' });
+  }
+};
+
+exports.influencerFilterMeta = async (req, res) => {
+  try {
+    // DISTINCT niche
+    const nicheRows = await db.Influencer.findAll({
+      attributes: [[fn("DISTINCT", col("niche")), "niche"]],
+      where: {
+        niche: { [Op.ne]: null },
+      },
+      raw: true,
+    });
+
+    const niches = nicheRows
+      .map((r) => r.niche)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+
+    // DISTINCT country (normalized into our 6 buckets)
+    const countryRows = await db.Influencer.findAll({
+      attributes: [[fn("DISTINCT", col("country")), "country"]],
+      where: {
+        country: { [Op.ne]: null },
+      },
+      raw: true,
+    });
+
+    const countrySet = new Set();
+
+    countryRows.forEach((r) => {
+      const norm = normalizeCountry(r.country);
+      if (norm) countrySet.add(norm);
+    });
+
+    if (countrySet.size === 0) {
+      countrySet.add("India");
+    }
+
+    const countries = Array.from(countrySet).sort((a, b) =>
+      a.localeCompare(b)
+    );
+
+    return res.json({
+      niches,
+      countries,
+    });
+  } catch (err) {
+    console.error("Error fetching influencer filter meta:", err);
+    res.status(500).json({ message: err.message || "Failed to fetch meta" });
   }
 };
 

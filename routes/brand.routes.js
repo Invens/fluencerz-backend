@@ -44,6 +44,7 @@ const brandUpload = multer({ storage: brandStorage, fileFilter });
 router.get('/dashboard/requests', verifyToken, requireRole('brand'), brandController.getMyRequests);
 router.get('/overview', verifyToken, requireRole('brand'), brandController.getBrandOverview);
 router.get('/influencers',verifyToken, requireRole('brand'), brandController.influencers);
+router.get('/influencers/meta', verifyToken, requireRole('brand'), brandController.influencerFilterMeta);
 router.get('/campaigns', verifyToken, requireRole('brand'), brandController.campaign);
 router.get('/rating',verifyToken, requireRole('brand'),brandController.ratings);
 router.post('/addRating', verifyToken, requireRole('brand'), brandController.addRating);
