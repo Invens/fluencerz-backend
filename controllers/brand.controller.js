@@ -404,7 +404,6 @@ exports.getBrandOverview = async (req, res) => {
   }
 };
 
-// controllers/brandController.js
 
 exports.influencers = async (req, res) => {
   try {
@@ -544,6 +543,16 @@ exports.influencers = async (req, res) => {
         'created_at',
         'updated_at',
       ],
+      include: [
+        {
+          model: db.InfluencerInstagramAccount,
+          as: 'instagramAccount',
+          required: false,
+          attributes: {
+            exclude: ['access_token', 'token_expires_at', 'created_at', 'updated_at']
+          }
+        }
+      ],
       limit,
       offset,
       order: [[sortBy, sortDir]],
@@ -558,6 +567,7 @@ exports.influencers = async (req, res) => {
       const followersByCountry = Array.isArray(inf.followers_by_country) ? inf.followers_by_country : [];
       const categories = Array.isArray(inf.categories) ? inf.categories : [];
       const instagramPosts = Array.isArray(inf.instagram_posts) ? inf.instagram_posts : [];
+      const instagramAccountData = inf.instagramAccount || null;
 
       const totalSocialFollowers = socialPlatforms.reduce(
         (sum, p) => sum + (parseInt(p.followers, 10) || 0),
@@ -605,6 +615,7 @@ exports.influencers = async (req, res) => {
           social_platforms: socialPlatforms,
           communication_channel: inf.communication_channel || {},
           instagram_posts: instagramPosts,
+          instagram_account: instagramAccountData,
         },
 
         // Raw import / meta
@@ -1220,8 +1231,7 @@ Use short bullet-style strings inside the arrays.
       blueprint.content_type
     );
 
-    const campaignPayload = {
-      brand_id: brandId,
+    const structuredBlueprint = {
       title: blueprint.title || "AI Generated Campaign",
       description: blueprint.description || idea,
       platform: normalizedPlatform,
@@ -1235,16 +1245,12 @@ Use short bullet-style strings inside the arrays.
       guidelines_do: parseStructuredField(blueprint.guidelines_do),
       guidelines_donot: parseStructuredField(blueprint.guidelines_donot),
       budget: parseBudgetValue(blueprint.budget),
-      feature_image: null,
-      status: "draft",
     };
-
-    const campaign = await Campaign.create(campaignPayload);
 
     return res.status(201).json({
       success: true,
-      message: "AI campaign draft created successfully",
-      data: campaign,
+      message: "AI campaign blueprint generated successfully",
+      data: structuredBlueprint,
       ai_blueprint: blueprint,
     });
   } catch (err) {
