@@ -63,6 +63,74 @@ const COUNTRY_VARIANTS = {
 // Flat list of all "non-India" country variants (used for India filter)
 const GLOBAL_NOT_INDIA_VALUES = Object.values(COUNTRY_VARIANTS).flat();
 
+const parseStructuredField = (value) => {
+  if (value === undefined || value === null) return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return value;
+    }
+  }
+  return value;
+};
+
+const parseBudgetValue = (value) => {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value === "number") return value;
+  const cleaned = String(value).replace(/[^0-9.]/g, "");
+  const parsed = parseFloat(cleaned);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const MAX_AI_INFLUENCER_CANDIDATES = 150;
+const DEFAULT_RECOMMENDATION_COUNT = 10;
+const PLATFORM_MAP = {
+  instagram: "Instagram",
+  youtube: "YouTube",
+  twitter: "Twitter",
+  telegram: "Telegram",
+  other: "Other",
+};
+const CONTENT_TYPE_OPTIONS = [
+  { keyword: "paid", value: "Paid per post" },
+  { keyword: "reel", value: "Reel" },
+  { keyword: "story", value: "Story" },
+  { keyword: "post", value: "Post" },
+  { keyword: "video", value: "Video" },
+];
+
+const normalizeEnumString = (value, optionsMap, fallback = "Other") => {
+  if (!value) return fallback;
+  const str = String(value).trim();
+  if (!str) return fallback;
+  const lower = str.toLowerCase();
+  return optionsMap[lower] || fallback;
+};
+
+const normalizePlatformValue = (value) => {
+  if (Array.isArray(value)) {
+    return normalizeEnumString(value[0], PLATFORM_MAP);
+  }
+  return normalizeEnumString(value, PLATFORM_MAP);
+};
+
+const normalizeContentTypeValue = (value) => {
+  const scanValues = Array.isArray(value) ? value : [value];
+  for (const item of scanValues) {
+    if (!item) continue;
+    const lowerItem = String(item).toLowerCase();
+    for (const option of CONTENT_TYPE_OPTIONS) {
+      if (lowerItem.includes(option.keyword)) {
+        return option.value;
+      }
+    }
+  }
+  return "Other";
+};
+
 /**
  * Normalize raw DB country value into:
  *  - "Germany" | "Switzerland" | "Austria" | "United Kingdom" | "United States"
@@ -1056,6 +1124,139 @@ exports.createCampaign = async (req, res) => {
   }
 };
 
+exports.createCampaignWithAI = async (req, res) => {
+  try {
+    const brandId = req.user.id;
+    const { idea, tone, target_audience, platform_preferences, product_details } = req.body;
+
+    if (!idea || typeof idea !== "string" || !idea.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "idea is required to generate a campaign",
+      });
+    }
+
+    const contextLines = [
+      tone ? `Preferred tone: ${tone}` : null,
+      target_audience ? `Target audience: ${target_audience}` : null,
+      platform_preferences ? `Platform preferences: ${platform_preferences}` : null,
+      product_details ? `Product / offer details: ${product_details}` : null,
+    ].filter(Boolean);
+
+    const contextBlock = contextLines.length
+      ? `\nAdditional context:\n- ${contextLines.join("\n- ")}`
+      : "";
+
+    const schemaInstruction = `
+Return ONLY valid JSON (no markdown) following this schema:
+{
+  "title": "string",
+  "description": "string",
+  "platform": "string",
+  "content_type": "string",
+  "budget": 0,
+  "brief_link": null,
+  "media_kit_link": null,
+  "eligibility_criteria": ["string"],
+  "campaign_requirements": ["string"],
+  "guidelines_do": ["string"],
+  "guidelines_donot": ["string"]
+}
+Use short bullet-style strings inside the arrays.
+    `.trim();
+
+    const aiResponse = await axios.post(
+      "https://api.deepseek.com/v1/chat/completions",
+      {
+        model: "deepseek-chat",
+        temperature: 0.7,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a campaign strategist who crafts influencer campaign briefs. Always reply with JSON that matches the requested schema.",
+          },
+          {
+            role: "user",
+            content: `Brand campaign idea:\n${idea}${contextBlock}\n\n${schemaInstruction}`,
+          },
+        ],
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    const aiMessage = aiResponse?.data?.choices?.[0]?.message?.content?.trim();
+    if (!aiMessage) {
+      return res.status(502).json({
+        success: false,
+        message: "AI did not return any campaign data",
+      });
+    }
+
+    const sanitizedAiMessage = aiMessage
+      .replace(/```json/gi, "")
+      .replace(/```/g, "")
+      .trim();
+
+    let blueprint;
+    try {
+      blueprint = JSON.parse(sanitizedAiMessage);
+    } catch (parseErr) {
+      console.error("❌ AI campaign JSON parse error:", sanitizedAiMessage);
+      return res.status(502).json({
+        success: false,
+        message: "AI response could not be parsed into JSON",
+        ai_output: sanitizedAiMessage,
+      });
+    }
+
+    const normalizedPlatform = normalizePlatformValue(blueprint.platform);
+    const normalizedContentType = normalizeContentTypeValue(
+      blueprint.content_type
+    );
+
+    const campaignPayload = {
+      brand_id: brandId,
+      title: blueprint.title || "AI Generated Campaign",
+      description: blueprint.description || idea,
+      platform: normalizedPlatform,
+      content_type: normalizedContentType,
+      brief_link: blueprint.brief_link ?? null,
+      media_kit_link: blueprint.media_kit_link ?? null,
+      eligibility_criteria: parseStructuredField(blueprint.eligibility_criteria),
+      campaign_requirements: parseStructuredField(
+        blueprint.campaign_requirements
+      ),
+      guidelines_do: parseStructuredField(blueprint.guidelines_do),
+      guidelines_donot: parseStructuredField(blueprint.guidelines_donot),
+      budget: parseBudgetValue(blueprint.budget),
+      feature_image: null,
+      status: "draft",
+    };
+
+    const campaign = await Campaign.create(campaignPayload);
+
+    return res.status(201).json({
+      success: true,
+      message: "AI campaign draft created successfully",
+      data: campaign,
+      ai_blueprint: blueprint,
+    });
+  } catch (err) {
+    console.error("❌ Error generating campaign with AI:", err.response?.data || err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to generate campaign with AI",
+      error: err?.response?.data?.message || err.message,
+    });
+  }
+};
+
 // ----------------- GET BRAND CAMPAIGNS -----------------
 exports.getMyCampaigns = async (req, res) => {
   try {
@@ -1599,11 +1800,53 @@ exports.getDashboardInsights = async (req, res) => {
 };
 
 exports.recommendInfluencers = async (req, res) => {
-  try {
-    const campaignDraft = req.body; // campaign form draft from frontend
+  let influencerPool = [];
 
-    // Fetch influencers from DB
-    const influencers = await Influencer.findAll({
+  const sendFallback = async (message) => {
+    if (!influencerPool.length) {
+      const fallbackRows = await Influencer.findAll({
+        attributes: [
+          "id",
+          "full_name",
+          "niche",
+          "followers_count",
+          "engagement_rate",
+          "profile_image",
+        ],
+        order: [["followers_count", "DESC"]],
+        limit: DEFAULT_RECOMMENDATION_COUNT,
+      });
+      influencerPool = fallbackRows.map((row) => row.toJSON());
+    }
+
+    const fallback = influencerPool
+      .slice(0, DEFAULT_RECOMMENDATION_COUNT)
+      .map((inf) => ({
+        id: inf.id,
+        full_name: inf.full_name,
+        niche: inf.niche,
+        followers_count: inf.followers_count,
+        engagement_rate: inf.engagement_rate,
+        profile_image: inf.profile_image,
+      }));
+
+    return res.status(200).json({
+      success: true,
+      source: "fallback",
+      message,
+      recommended: fallback,
+    });
+  };
+
+  try {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) {
+      return sendFallback("AI key missing; returning default influencers");
+    }
+
+    const campaignDraft = req.body || {};
+
+    const influencerRows = await Influencer.findAll({
       attributes: [
         "id",
         "full_name",
@@ -1612,56 +1855,111 @@ exports.recommendInfluencers = async (req, res) => {
         "engagement_rate",
         "profile_image",
       ],
+      order: [["followers_count", "DESC"]],
+      limit: MAX_AI_INFLUENCER_CANDIDATES,
     });
 
-    // Send to DeepSeek API
+    influencerPool = influencerRows.map((row) => row.toJSON());
+
+    if (!influencerPool.length) {
+      return res.json({ success: true, recommended: [], source: "empty" });
+    }
+
+    const minimalPool = influencerPool.map((inf) => ({
+      id: inf.id,
+      name: inf.full_name,
+      niche: inf.niche,
+      followers_count: inf.followers_count,
+      engagement_rate: inf.engagement_rate,
+    }));
+
+    const schemaInstruction =
+      "Return ONLY a JSON array of influencer IDs (numbers) chosen from the provided list. Example: [1,5,7]";
+
     const response = await axios.post(
       "https://api.deepseek.com/v1/chat/completions",
       {
         model: "deepseek-chat",
+        temperature: 0.5,
         messages: [
           {
             role: "system",
             content:
-              "You are an assistant that selects influencers. Return only a JSON array of influencer IDs that best fit the campaign draft.",
+              "You recommend influencers for campaigns. Always respond with raw JSON as requested.",
           },
           {
             role: "user",
-            content: `Here is a campaign draft: ${JSON.stringify(
+            content: `Campaign draft: ${JSON.stringify(
               campaignDraft
-            )}. 
-Here is a list of influencers: ${JSON.stringify(influencers)}. 
-Return ONLY influencer IDs in JSON array format. Example: [1,5,7]`,
+            )}\nInfluencer pool: ${JSON.stringify(
+              minimalPool
+            )}\n\n${schemaInstruction}`,
           },
         ],
       },
       {
         headers: {
-          Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
       }
     );
 
-    const aiOutput = response.data.choices[0].message.content.trim();
-    let recommendedIds = [];
+    const aiOutput =
+      response?.data?.choices?.[0]?.message?.content?.trim() || "[]";
+    const sanitized = aiOutput
+      .replace(/```json/gi, "")
+      .replace(/```/g, "")
+      .trim();
+
+    let recommendedIds;
     try {
-      recommendedIds = JSON.parse(aiOutput);
-    } catch (e) {
-      console.warn("⚠️ AI output not JSON:", aiOutput);
+      recommendedIds = JSON.parse(sanitized);
+    } catch (parseErr) {
+      console.warn("⚠️ AI output not JSON:", sanitized);
+      return sendFallback("AI response could not be parsed; showing defaults");
     }
 
-    // Filter influencers from DB
-    const recommended = influencers.filter((i) =>
-      recommendedIds.includes(i.id)
+    if (!Array.isArray(recommendedIds)) {
+      return sendFallback("AI response invalid; showing defaults");
+    }
+
+    const normalizedIds = Array.from(
+      new Set(
+        recommendedIds
+          .map((id) => Number(id))
+          .filter((id) => Number.isInteger(id) && id > 0)
+      )
     );
 
-    res.json({ success: true, recommended });
+    if (!normalizedIds.length) {
+      return sendFallback("AI response empty; showing defaults");
+    }
+
+    const recommended = influencerPool
+      .filter((inf) => normalizedIds.includes(inf.id))
+      .slice(0, DEFAULT_RECOMMENDATION_COUNT)
+      .map((inf) => ({
+        id: inf.id,
+        full_name: inf.full_name,
+        niche: inf.niche,
+        followers_count: inf.followers_count,
+        engagement_rate: inf.engagement_rate,
+        profile_image: inf.profile_image,
+      }));
+
+    if (!recommended.length) {
+      return sendFallback("AI picked influencers not in pool; showing defaults");
+    }
+
+    return res.json({
+      success: true,
+      source: "ai",
+      recommended,
+    });
   } catch (err) {
-    console.error("❌ Recommend Influencers Error:", err.message);
-    res
-      .status(500)
-      .json({ success: false, message: "AI recommendation failed" });
+    console.error("❌ Recommend Influencers Error:", err.response?.data || err);
+    return sendFallback("AI recommendation failed; showing defaults");
   }
 };
 

@@ -57,6 +57,12 @@ router.post('/add-to-campaign/:id', verifyToken, requireRole('brand'), brandCont
 router.get('/me', verifyToken, requireRole('brand'), brandController.getMyProfile);
 router.get('/list', brandController.brandList);
 router.post('/add-campaign', verifyToken, requireRole('brand'), brandUpload.single('feature_image'), brandController.createCampaign);
+router.post(
+  '/campaigns/ai',
+  verifyToken,
+  requireRole('brand'),
+  brandController.createCampaignWithAI
+);
 
 router.get('/campaigns-list',verifyToken, requireRole('brand'),brandController.getMyCampaigns);
 router.put('/campaigns/:id',verifyToken,requireRole('brand'),brandUpload.single('feature_image'),brandController.updateCampaign);
